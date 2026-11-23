@@ -17,6 +17,9 @@ export class GitError extends Error {
   }
 }
 
+/** Git did not finish in the time it was given, and was stopped where it was. */
+export class GitTimeout extends GitError {}
+
 /** A request this module turns down itself (main worktree, not a worktree, bad name...): never worth retrying. */
 export class GitRefusal extends GitError {}
 
@@ -50,23 +53,50 @@ export async function retryWhileBusy<T>(
 }
 
 const TIMEOUT_MS = 15000;
+/**
+ * For the commands that write the files of a worktree: checking out a large repository takes
+ * minutes, not seconds, and git stopped half-way leaves a worktree that is neither there nor gone.
+ */
+export const CHECKOUT_TIMEOUT_MS = 15 * 60 * 1000;
 
 export type RunGit = (args: string[], cwd: string) => Promise<string>;
 
+/** A line git writes to say how far it is ("Updating files:  12% (5686/47376)"), not what went wrong. */
+const PROGRESS = /^[^:]+:\s+\d+% \(\d+\/\d+\)/;
+
+/** What git wrote to stderr, without its progress reports (which it separates with carriage returns). */
+export function withoutProgress(stderr: string): string {
+  return stderr
+    .split(/[\r\n]+/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0 && !PROGRESS.test(line))
+    .join('\n');
+}
+
 /**
- * Runs git without a shell and returns stdout. Throws GitError when git fails or is missing.
- * Git speaks English here (LC_ALL=C), so that its messages can be recognised.
+ * Runs git without a shell and returns stdout. Throws GitError when git fails, is missing, or
+ * does not finish in time. Git speaks English here (LC_ALL=C), so that its messages can be recognised.
  */
-export function runGit(args: string[], cwd: string): Promise<string> {
+export function runGit(args: string[], cwd: string, o: { timeoutMs?: number } = {}): Promise<string> {
+  const timeoutMs = o.timeoutMs ?? TIMEOUT_MS;
   return new Promise((resolvePromise, reject) => {
     execFile(
       'git',
       args,
-      { cwd, timeout: TIMEOUT_MS, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C', LANG: 'C' } },
+      { cwd, timeout: timeoutMs, windowsHide: true, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C', LANG: 'C' } },
       (error, stdout, stderr) => {
         if (error) {
-          const text = String(stderr ?? '').trim();
-          reject(new GitError(text || error.message, (error as NodeJS.ErrnoException).code ?? undefined));
+          const code = (error as NodeJS.ErrnoException).code ?? undefined;
+          // Node stops a git that runs past the timeout; what git had printed until then is not an error.
+          if (error.killed && code === undefined) {
+            reject(new GitTimeout(`git ${args[0]} did not finish within ${countOf(Math.round(timeoutMs / 1000), 'second', 'seconds')} and was stopped.`));
+            return;
+          }
+          const printed = String(stderr ?? '');
+          // Node's own message repeats all that git printed, progress included: it is used
+          // only when git printed nothing (it is missing, or could not be started).
+          const fallback = printed.trim() ? `git ${args[0]} failed${typeof code === 'number' ? ` (exit ${code})` : ''}` : error.message;
+          reject(new GitError(withoutProgress(printed) || fallback, code));
           return;
         }
         resolvePromise(String(stdout));
@@ -257,10 +287,19 @@ export async function createWorktree(
     }
     if (entries.length > 0) throw new GitRefusal('The worktree folder already exists and is not empty');
   }
+  // Quiet: the progress of the checkout has nowhere to be shown, and it is not an error.
   const args = o.newBranch
-    ? ['worktree', 'add', '-b', o.branch, '--', o.path, base]
-    : ['worktree', 'add', '--', o.path, o.branch];
-  await runGit(args, repo);
+    ? ['worktree', 'add', '--quiet', '-b', o.branch, '--', o.path, base]
+    : ['worktree', 'add', '--quiet', '--', o.path, o.branch];
+  try {
+    await runGit(args, repo, { timeoutMs: CHECKOUT_TIMEOUT_MS });
+  } catch (e) {
+    // Git stopped half-way has listed the worktree (and made the branch) already, so the same
+    // request would be refused next time. It is not undone here: that deletes files.
+    if (!(e instanceof GitTimeout)) throw e;
+    const left = o.newBranch ? `the worktree ${o.path} and the new branch ${o.branch}` : `the worktree ${o.path}`;
+    throw new GitTimeout(`${e.message} It left ${left} incomplete: remove ${o.newBranch ? 'them' : 'it'} before trying again.`);
+  }
   return listingOf(repo);
 }
 

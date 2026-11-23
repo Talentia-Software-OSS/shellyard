@@ -622,9 +622,9 @@ describe('order', () => {
     it('gives a snapshot for a live session, an empty one for a failed start, null for unknown', async () => {
       const s = shell();
       ptys.last().emit('hello');
-      expect(await mgr.snapshot(s.id)).toContain('hello');
+      expect((await mgr.snapshot(s.id))?.data).toContain('hello');
       const failed = mgr.create({ kind: 'shell', command: 'definitely-not-a-command-xyz', cwd: tmp });
-      expect(await mgr.snapshot(failed.id)).toBe('');
+      expect((await mgr.snapshot(failed.id))?.data).toBe('');
       expect(await mgr.snapshot('nope')).toBeNull();
     });
 

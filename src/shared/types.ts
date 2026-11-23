@@ -423,8 +423,11 @@ export type ServerMessage =
   | { t: 'changes'; changes: ChangeSummary[] }
   /** Whether phone access is on, where, and how many phones are connected. Never carries the link. */
   | { t: 'lan'; lan: LanStatus }
-  | { t: 'snapshot'; id: string; data: string }
-  | { t: 'output'; id: string; data: string };
+  /** The screen of a session, and the size it was taken at. */
+  | { t: 'snapshot'; id: string; data: string; cols: number; rows: number }
+  | { t: 'output'; id: string; data: string }
+  /** The session has this size from this point of its output on. */
+  | { t: 'size'; id: string; cols: number; rows: number };
 
 export interface Worktree {
   path: string;

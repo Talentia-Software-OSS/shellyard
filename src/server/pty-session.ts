@@ -23,7 +23,14 @@ export interface PtyOptions {
   rows: number;
 }
 
-export type PtyFactory = (launch: Launch, opts: PtyOptions) => PtyLike;
+/** The serialized screen of a session, and the size it had when it was serialized. */
+export interface Snapshot {
+  data: string;
+  cols: number;
+  rows: number;
+}
+
+export type PtyFactory =(launch: Launch, opts: PtyOptions) => PtyLike;
 
 export const realPtyFactory: PtyFactory = (launch, opts) =>
   nodePty.spawn(launch.file, launch.args, {
@@ -121,10 +128,11 @@ export class PtySession {
    * serialized inside its callback: output arriving after the call is parsed later and is
    * not in the snapshot. A caller that starts buffering live output at the moment of the
    * call can therefore send snapshot + buffer with nothing lost and nothing doubled.
+   * The size is the one the screen had as it was serialized: the one to draw it at.
    */
-  snapshot(): Promise<string> {
-    return new Promise<string>((resolve) => {
-      this.mirror.write('', () => resolve(this.serializer.serialize()));
+  snapshot(): Promise<Snapshot> {
+    return new Promise<Snapshot>((resolve) => {
+      this.mirror.write('', () => resolve({ data: this.serializer.serialize(), cols: this.mirror.cols, rows: this.mirror.rows }));
     });
   }
 

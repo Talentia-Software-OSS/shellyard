@@ -1,7 +1,7 @@
 {
   "name": "@talentiaoss/shellyard-desktop",
   "productName": "ShellYard",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "ShellYard as a desktop app: the same terminals and Claude Code sessions in their own window instead of a browser tab.",
   "type": "module",
   "main": "main.js",

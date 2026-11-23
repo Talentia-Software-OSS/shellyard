@@ -14,9 +14,9 @@ import type { ErrorReporter } from './errors.js';
 import type { ChangeTracker } from './changes.js';
 
 interface Subscription {
-  /** False while the snapshot is being taken; live output is held back until it is sent. */
+  /** False while the snapshot is being taken; what happens meanwhile is held back until it is sent. */
   ready: boolean;
-  buffer: string[];
+  buffer: ServerMessage[];
 }
 
 interface Client {
@@ -168,23 +168,46 @@ export function attachWebSocket(server: Server, deps: WebSocketDeps): WebSocketH
     for (const c of clients) {
       const sub = c.subs.get(id);
       if (!sub) continue;
-      if (sub.ready) send(c, { t: 'output', id, data });
-      else sub.buffer.push(data);
+      const m: ServerMessage = { t: 'output', id, data };
+      if (sub.ready) send(c, m);
+      else sub.buffer.push(m);
     }
   });
 
+  /**
+   * Resizes a session and tells the pages showing it, in the stream of its output: what the
+   * program prints from here on is drawn for the new size, so a terminal has to take the size
+   * at this very point. Taking it later (from the session list) leaves its screen out of place.
+   */
+  function resize(id: string, cols: number, rows: number): void {
+    const before = manager.get(id);
+    if (!before) return;
+    manager.resize(id, cols, rows);
+    const after = manager.get(id);
+    if (!after || (after.cols === before.cols && after.rows === before.rows)) return;
+    const m: ServerMessage = { t: 'size', id, cols: after.cols, rows: after.rows };
+    for (const c of clients) {
+      const sub = c.subs.get(id);
+      if (!sub) continue;
+      if (sub.ready) send(c, m);
+      else sub.buffer.push(m);
+    }
+  }
+
   function attach(c: Client, id: string, cols: number, rows: number): void {
     if (!manager.get(id)) return;
-    manager.resize(id, cols, rows);
+    resize(id, cols, rows);
     // Buffering starts in the same tick as the snapshot request, so the two meet exactly:
     // the snapshot holds everything before this point, the buffer everything after.
     const sub: Subscription = { ready: false, buffer: [] };
     c.subs.set(id, sub);
-    void manager.snapshot(id).then((data) => {
+    void manager.snapshot(id).then((snapshot) => {
       // A newer attach or a detach has replaced this subscription: drop the stale answer.
-      if (c.subs.get(id) !== sub || data === null) return;
-      send(c, { t: 'snapshot', id, data });
-      for (const chunk of sub.buffer) send(c, { t: 'output', id, data: chunk });
+      if (c.subs.get(id) !== sub || snapshot === null) return;
+      // With the size the screen had as it was serialized, which the terminal has to have to
+      // draw it; a resize since then is in the buffer, after it.
+      send(c, { t: 'snapshot', id, ...snapshot });
+      for (const m of sub.buffer) send(c, m);
       sub.buffer = [];
       sub.ready = true;
     });
@@ -204,7 +227,7 @@ export function attachWebSocket(server: Server, deps: WebSocketDeps): WebSocketH
         manager.input(m.id, m.data);
         break;
       case 'resize':
-        manager.resize(m.id, m.cols, m.rows);
+        resize(m.id, m.cols, m.rows);
         break;
     }
   }

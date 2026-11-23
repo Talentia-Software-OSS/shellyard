@@ -25,9 +25,19 @@ describe('PtySession with a fake pty', () => {
     const f = fakePtyFactory();
     const s = new PtySession(f.factory, launch, opts);
     f.last().emit('hello\r\nworld');
-    const snap = await s.snapshot();
+    const snap = (await s.snapshot()).data;
     expect(snap).toContain('hello');
     expect(snap).toContain('world');
+  });
+
+  it('gives a snapshot with the size the screen had when it was taken', async () => {
+    const f = fakePtyFactory();
+    const s = new PtySession(f.factory, launch, opts);
+    const before = s.snapshot();
+    s.resize(100, 30);
+    expect(await before).toMatchObject({ cols: 100, rows: 30 });
+    const after = s.snapshot();
+    expect(await after).toMatchObject({ cols: 100, rows: 30 });
   });
 
   it('keeps the mirror capped when output far exceeds the scrollback', async () => {
@@ -36,7 +46,7 @@ describe('PtySession with a fake pty', () => {
     const seen: string[] = [];
     s.onOutput((d) => seen.push(d));
     for (let i = 0; i < 10_000; i++) f.last().emit(`line-${i}\r\n`);
-    const snap = await s.snapshot();
+    const snap = (await s.snapshot()).data;
     const lines = snap.split('\r\n');
     expect(lines.length).toBeLessThanOrEqual(5000 + 24 + 1);
     expect(snap).toContain('line-9999');

@@ -1,11 +1,14 @@
 import type { AreaRule, ChangeSummary, ClientMessage, ClosedSession, ErrorReport, LanStatus, Schedule, ServerMessage, SessionInfo, Story, UsageSummary } from '../shared/types.js';
 
 export type ConnectionState = 'connecting' | 'open' | 'reconnecting' | 'down' | 'unauthorized';
-export type TerminalMessage = { t: 'snapshot' | 'output'; data: string };
+export type TerminalMessage =
+  | { t: 'snapshot'; data: string; cols: number; rows: number }
+  | { t: 'output'; data: string }
+  | { t: 'size'; cols: number; rows: number };
 
 export interface Socket {
   send(m: ClientMessage): void;
-  /** Receives the snapshot and the live output of one session. Returns an unsubscribe. */
+  /** Receives the snapshot, the live output and the size changes of one session, in order. Returns an unsubscribe. */
   subscribe(id: string, cb: (m: TerminalMessage) => void): () => void;
   onSessions(cb: (s: SessionInfo[]) => void): void;
   onStories(cb: (s: Story[]) => void): void;
@@ -96,7 +99,7 @@ export function connect(url: string, protocols: string[]): Socket {
         for (const cb of lanCbs) cb(m.lan);
       } else {
         const subs = terminalSubs.get(m.id);
-        if (subs) for (const cb of [...subs]) cb({ t: m.t, data: m.data });
+        if (subs) for (const cb of [...subs]) cb(m);
       }
     };
     socket.onclose = () => {

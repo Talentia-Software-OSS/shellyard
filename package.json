@@ -1,6 +1,6 @@
 {
   "name": "@talentiaoss/shellyard",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "ShellYard: run Claude Code sessions and shells in one local browser page, and see which one needs you.",
   "type": "module",
   "bin": {

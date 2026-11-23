@@ -14,8 +14,10 @@ import {
   retryWhileBusy,
   headOf,
   removeWorktree,
+  runGit,
   samePath,
   switchBranch,
+  withoutProgress,
   worktreeStatus,
   worktreesOf,
 } from '../../src/server/git.js';
@@ -48,6 +50,27 @@ describe('samePath', () => {
   });
   it('tells different paths apart', () => {
     expect(samePath('/a/b', '/a/c')).toBe(false);
+  });
+});
+
+describe('withoutProgress', () => {
+  it('drops the progress git reports while it checks files out, and keeps what it says', () => {
+    const stderr =
+      "Preparing worktree (checking out 'big')\nUpdating files:   2% (1383/47376)\rUpdating files:  60% (28426/47376)\rfatal: unable to write file a.txt\n";
+    expect(withoutProgress(stderr)).toBe("Preparing worktree (checking out 'big')\nfatal: unable to write file a.txt");
+  });
+  it('leaves an ordinary message as it is', () => {
+    expect(withoutProgress("fatal: 'x' is already checked out at 'C:/r/x'\n")).toBe("fatal: 'x' is already checked out at 'C:/r/x'");
+    expect(withoutProgress('')).toBe('');
+  });
+});
+
+describe.runIf(hasGit)('runGit', () => {
+  it('says that git ran out of time, not what it had printed until then', async () => {
+    // Reading from a standard input that never ends: git is still there when the time is up.
+    const error = await runGit(['hash-object', '--stdin'], process.cwd(), { timeoutMs: 1000 }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(GitError);
+    expect((error as GitError).message).toBe('git hash-object did not finish within 1 second and was stopped.');
   });
 });
 

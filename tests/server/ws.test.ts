@@ -242,6 +242,82 @@ describe('websocket', () => {
     expect(pty.resizes).toEqual([[100, 40]]);
   });
 
+  it('sends the snapshot with the size it was taken at', async () => {
+    const s = shell();
+    const c = await connect();
+    c.send({ t: 'attach', id: s.id, cols: 90, rows: 25 });
+    await waitUntil(() => c.of('snapshot').length === 1);
+    expect(c.of('snapshot')[0]).toMatchObject({ cols: 90, rows: 25 });
+    // The size came with the snapshot: it is not told a second time.
+    expect(c.of('size')).toEqual([]);
+  });
+
+  it('tells a new size to the pages showing the session, where it changed in the output', async () => {
+    const s = shell();
+    const other = shell();
+    const pty = ptys.last(); // of `other`
+    const first = ptys.ptys[ptys.ptys.length - 2]!;
+    const c1 = await connect();
+    const c2 = await connect();
+    c1.send({ t: 'attach', id: s.id, cols: 90, rows: 25 });
+    c2.send({ t: 'attach', id: s.id, cols: 0, rows: 0 });
+    await waitUntil(() => c1.of('snapshot').length === 1 && c2.of('snapshot').length === 1);
+    expect(c2.of('snapshot')[0]).toMatchObject({ cols: 90, rows: 25 });
+    first.emit('before');
+    c1.send({ t: 'resize', id: s.id, cols: 120, rows: 40 });
+    await waitUntil(() => first.resizes.length === 2);
+    first.emit('after');
+    // A session neither page shows: its size is no business of theirs.
+    c1.send({ t: 'resize', id: other.id, cols: 70, rows: 20 });
+    await waitUntil(() => pty.resizes.length === 1);
+    // The same size again changes nothing, and says nothing.
+    c1.send({ t: 'resize', id: s.id, cols: 120, rows: 40 });
+    for (const c of [c1, c2]) {
+      await waitUntil(() => c.of('output').length === 2);
+      const stream = c.messages.filter((m) => m.t === 'output' || m.t === 'size');
+      expect(stream).toEqual([
+        { t: 'output', id: s.id, data: 'before' },
+        { t: 'size', id: s.id, cols: 120, rows: 40 },
+        { t: 'output', id: s.id, data: 'after' },
+      ]);
+    }
+  });
+
+  it('holds a new size back, in its place among the output, while the snapshot is being taken', async () => {
+    const s = shell();
+    const pty = ptys.last();
+    const c1 = await connect();
+    const c2 = await connect();
+    c1.send({ t: 'attach', id: s.id, cols: 90, rows: 25 });
+    await waitUntil(() => c1.of('snapshot').length === 1);
+    const realSnapshot = mgr.snapshot.bind(mgr);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((r) => (release = r));
+    let taking = false;
+    mgr.snapshot = async (id: string) => {
+      const data = await realSnapshot(id);
+      taking = true;
+      await held;
+      return data;
+    };
+    c2.send({ t: 'attach', id: s.id, cols: 0, rows: 0 });
+    await waitUntil(() => taking);
+    pty.emit('one');
+    c1.send({ t: 'resize', id: s.id, cols: 120, rows: 40 });
+    await waitUntil(() => pty.resizes.length === 2);
+    pty.emit('two');
+    await waitUntil(() => c1.of('output').length === 2);
+    release();
+    await waitUntil(() => c2.of('output').length === 2);
+    // The snapshot was taken before the resize: it says the size it was taken at, not the one of now.
+    expect(c2.messages.filter((m) => m.t === 'snapshot' || m.t === 'output' || m.t === 'size').map((m) => (m.t === 'output' ? m.data : m.t === 'size' ? `${m.cols}x${m.rows}` : `snapshot ${m.cols}x${m.rows}`))).toEqual([
+      'snapshot 90x25',
+      'one',
+      '120x40',
+      'two',
+    ]);
+  });
+
   it('survives garbage, unknown message types, wrong field types and unknown sessions', async () => {
     const s = shell();
     const pty = ptys.last();

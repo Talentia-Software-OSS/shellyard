@@ -35,7 +35,8 @@ function cssVar(name: string, fallback: string): string {
  * So one page decides and the others follow: a page claims the size when it is the one being
  * used (it is shown, its terminal is focused, its own layout changes), and a page that sees
  * the session take another size sets its terminal to that size instead of its own fit. A
- * terminal drawn at another size than the program believes shows its text out of place.
+ * terminal drawn at another size than the program believes shows its text out of place, so
+ * the size comes with the output, and is taken at the point of the output where it changed.
  */
 export function TerminalView(props: {
   sessionId: string;
@@ -65,8 +66,6 @@ export function TerminalView(props: {
   const applyFont = useRef<() => void>(() => undefined);
   const sizeRef = useRef(props.size);
   sizeRef.current = props.size;
-  /** Sets the terminal to the session's size when another page has changed it. */
-  const followSize = useRef<() => void>(() => undefined);
   const searchAddon = useRef<SearchAddon | null>(null);
   const terminal = useRef<Terminal | null>(null);
   const searchInput = useRef<HTMLInputElement>(null);
@@ -139,10 +138,6 @@ export function TerminalView(props: {
   }, [font?.family, font?.size]);
 
   useEffect(() => {
-    followSize.current();
-  }, [props.size?.cols, props.size?.rows]);
-
-  useEffect(() => {
     const el = host.current;
     if (!el) return;
     const socket = getSocket();
@@ -200,6 +195,11 @@ export function TerminalView(props: {
 
     // The size this page last asked for, until the server's answer has come back.
     let asked: { cols: number; rows: number; at: number } | null = null;
+    // What the last attach asked for: the snapshot that answers it is taken after the server
+    // has dealt with it, so by then it is no longer on its way.
+    let attachAsked: { cols: number; rows: number; at: number } | null = null;
+    // Counts the snapshots: a size that was told before one is not for the screen it restores.
+    let screen = 0;
     const ASKED_MS = 1500;
     // Whether this page is the one deciding the size. It stops being so when it takes a size
     // another page set, and then its own layout changing is no reason to take the size back:
@@ -214,19 +214,35 @@ export function TerminalView(props: {
       asked = { cols: term.cols, rows: term.rows, at: Date.now() };
       socket.send({ t: 'resize', id: sessionId, cols: term.cols, rows: term.rows });
     };
-    /** Takes the size the session has, when it is not the one this page asked for. */
-    const follow = (): void => {
-      const known = sizeRef.current;
-      if (!known || known.cols < 2 || known.rows < 2) return;
-      if (asked && asked.cols === known.cols && asked.rows === known.rows) asked = null;
+    /** Takes the size the session has taken, when it is not the one this page asked for. */
+    const follow = (size: { cols: number; rows: number }): void => {
+      if (size.cols < 2 || size.rows < 2) return;
+      const ours = asked !== null && asked.cols === size.cols && asked.rows === size.rows;
+      if (ours) asked = null;
       // An answer still on its way must not be undone by an older size arriving first.
       if (asked && Date.now() - asked.at < ASKED_MS) return;
       asked = null;
-      if (known.cols === term.cols && known.rows === term.rows) return;
-      deciding = false;
-      term.resize(known.cols, known.rows);
+      if (size.cols === term.cols && size.rows === term.rows) return;
+      // Taking the size this page asked for (a snapshot had it draw at another meanwhile) is
+      // still deciding it; taking the size of another page is not.
+      if (!ours) deciding = false;
+      term.resize(size.cols, size.rows);
     };
-    followSize.current = follow;
+    /**
+     * Takes the size a snapshot was taken at, whatever this page asked for: the snapshot can
+     * only be drawn at that size. Only a request made after the attach can still be on its way.
+     */
+    const restoreAt = (size: { cols: number; rows: number }): void => {
+      if (size.cols < 2 || size.rows < 2) return;
+      const ours = asked !== null && asked.cols === size.cols && asked.rows === size.rows;
+      const onItsWay = asked !== null && !ours && asked !== attachAsked;
+      if (!onItsWay) asked = null;
+      attachAsked = null;
+      if (size.cols === term.cols && size.rows === term.rows) return;
+      // Another page has set the size since: this one follows, and does not take it back.
+      if (!ours && !onItsWay) deciding = false;
+      term.resize(size.cols, size.rows);
+    };
 
     const attach = (): void => {
       // A page nobody is looking at does not get to decide the size: it attaches as it is
@@ -238,14 +254,27 @@ export function TerminalView(props: {
       deciding = true;
       safeFit();
       asked = { cols: term.cols, rows: term.rows, at: Date.now() };
+      attachAsked = asked;
       socket.send({ t: 'attach', id: sessionId, cols: term.cols, rows: term.rows });
     };
 
     const unsubscribe = socket.subscribe(sessionId, (m) => {
+      if (m.t === 'size') {
+        // The size changes where it did in the output: what was printed before it is drawn at
+        // the size it was printed for, and what comes after at the new one. Taking the size
+        // at any other moment draws the program's repaint out of place, and it stays so.
+        // A snapshot arriving before this is reached has its own size, a newer one.
+        const told = screen;
+        term.write('', () => {
+          if (told === screen) follow(m);
+        });
+        return;
+      }
       if (m.t === 'snapshot') {
+        screen += 1;
         term.reset();
-        // The snapshot was taken at the session's size; it is drawn at that size.
-        follow();
+        // The snapshot is drawn at the size it was taken at.
+        restoreAt(m);
       }
       term.write(m.data);
     });
@@ -313,7 +342,6 @@ export function TerminalView(props: {
       clearTimeout(timer);
       observer.disconnect();
       document.removeEventListener('visibilitychange', onVisible);
-      followSize.current = () => undefined;
       el.removeEventListener('focusin', onFocusIn);
       el.removeEventListener('focusout', onFocusOut);
       offTouch();

@@ -11,7 +11,7 @@ import { cleanupClaudeLaunch, prepareClaudeLaunch, withoutClaudeSessionMarkers, 
 import type { Config } from './config.js';
 import { headOf, isInside, samePath, worktreesOf } from './git.js';
 import { isTerminalReport } from './input.js';
-import { PtySession, type PtyFactory } from './pty-session.js';
+import { PtySession, type PtyFactory, type Snapshot } from './pty-session.js';
 import { applyOrder } from './order.js';
 import { detectProfiles, resolveExecutable, toLaunch } from './shells.js';
 import { initialState, reduce, type StatusEvent } from './state.js';
@@ -760,10 +760,10 @@ export class SessionManager {
     }
   }
 
-  async snapshot(id: string): Promise<string | null> {
+  async snapshot(id: string): Promise<Snapshot | null> {
     const e = this.entries.get(id);
     if (!e) return null;
-    return e.pty ? e.pty.snapshot() : '';
+    return e.pty ? e.pty.snapshot() : { data: '', cols: e.info.cols, rows: e.info.rows };
   }
 
   remove(id: string): boolean {
