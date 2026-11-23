@@ -3,7 +3,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { pipeline } from 'node:stream';
 import { extname, isAbsolute, resolve, sep } from 'node:path';
 import type { ConversationItem, CreateSessionRequest, HookName, Meta } from '../shared/types.js';
-import { classifyHost, healthProof, isChallenge, originAllowed, requestAuthorized, safeEqual } from './auth.js';
+import { healthProof, isChallenge, localGate, requestAuthorized, safeEqual, type Gate } from './auth.js';
+import type { LanAccess } from './lan.js';
 import { MAX_IMAGE_BYTES, readImage, saveImage } from './backgrounds.js';
 import { MAX_SOUND_BYTES, SoundStore } from './sounds.js';
 import { parseHookBody, parseHookRequest, permissionCommand } from './claude-launch.js';
@@ -66,6 +67,13 @@ export interface HttpDeps {
   pageHost: string;
   token: string;
   hookToken: string;
+  /**
+   * What this listener lets in. Absent: the loopback listener's own (the page of this start, the
+   * token above). The phone listener passes its own gate (see lan.ts).
+   */
+  gate?: Gate;
+  /** Phone access, switched on and off from the page; absent where there is none (tests). */
+  lan?: Pick<LanAccess, 'info' | 'start' | 'stop' | 'newLink'>;
   webDir: string;
   /** The package version this server runs, so a newer app can tell it is talking to an older server. */
   version?: string;
@@ -282,7 +290,7 @@ function sendOpenNotice(res: ServerResponse, stale: boolean, method: string): vo
   res.end(method === 'HEAD' ? undefined : html);
 }
 
-function serveStatic(webDir: string, pathname: string, method: string, res: ServerResponse, port: number, pageHost: string): void {
+function serveStatic(webDir: string, pathname: string, method: string, res: ServerResponse, wsOrigin: string): void {
   const root = resolve(webDir);
   let decoded: string;
   try {
@@ -330,7 +338,7 @@ function serveStatic(webDir: string, pathname: string, method: string, res: Serv
       // blob: is how the page shows a terminal background it fetched with its token.
       // blob: is also how it plays a sound the user added (fetched the same way).
       "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; " +
-      `connect-src 'self' ws://${pageHost}:${port}; ` +
+      `connect-src 'self' ${wsOrigin}; ` +
       "frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
   }
   res.writeHead(200, headers);
@@ -346,6 +354,7 @@ function serveStatic(webDir: string, pathname: string, method: string, res: Serv
 export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res: ServerResponse) => void {
   const { manager } = deps;
   const sounds = deps.sounds ?? new SoundStore(deps.stories);
+  const gate = deps.gate ?? localGate(deps.port, deps.pageHost, deps.token);
 
   /** Claude Code names the conversation in every report; that is how a restart can resume it. */
   function noteConversation(sessionId: string, body: unknown): void {
@@ -354,7 +363,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
   }
 
   async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const hostKind = classifyHost(req.headers.host, deps.port, deps.pageHost);
+    const hostKind = gate.classify(req);
     if (hostKind === 'foreign') {
       send(res, 403, { error: 'Forbidden host' });
       return;
@@ -363,11 +372,17 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     const path = url.pathname;
     const method = req.method ?? 'GET';
 
+    // The hooks, the status reports and the shutdown are for the processes of this computer,
+    // which use the loopback listener: the phone listener does not know them.
+    if (!gate.local && (path.startsWith('/api/hooks/') || path.startsWith('/api/status/') || path === '/api/shutdown')) {
+      throw new HttpError(404, 'Not found');
+    }
+
     if (path === '/api/health') {
       // Open to anyone, so it says nothing that identifies this instance. The shellyard
       // command tells its own server apart by the proof, which only the token holder can make.
       const challenge = url.searchParams.get('challenge');
-      const proof = isChallenge(challenge) ? healthProof(deps.token, challenge) : undefined;
+      const proof = gate.local && isChallenge(challenge) ? healthProof(deps.token, challenge) : undefined;
       send(res, 200, { ok: true, app: 'shellyard', version: deps.version, ...(proof ? { proof } : {}) });
       return;
     }
@@ -458,7 +473,7 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     // told how to open it.
     if (!path.startsWith('/api/')) {
       if (method !== 'GET' && method !== 'HEAD') throw new HttpError(405, 'Method not allowed');
-      if (hostKind === 'page') serveStatic(deps.webDir, path, method, res, deps.port, deps.pageHost);
+      if (hostKind === 'page') serveStatic(deps.webDir, path, method, res, gate.wsOrigin(req));
       else sendOpenNotice(res, hostKind === 'stale-page', method);
       return;
     }
@@ -469,14 +484,14 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       return;
     }
 
-    if (!requestAuthorized(req.headers, deps.token)) {
+    if (!requestAuthorized(req.headers, gate.token())) {
       send(res, 401, { error: 'Unauthorized' });
       return;
     }
 
     // The token header already cannot be set by another site without a preflight we never
     // approve. Refusing a foreign Origin as well costs nothing and guards against mistakes.
-    if (method !== 'GET' && req.headers.origin !== undefined && !originAllowed(req.headers.origin, deps.port, deps.pageHost)) {
+    if (method !== 'GET' && req.headers.origin !== undefined && !gate.originAllowed(req.headers.origin, req)) {
       throw new HttpError(403, 'Forbidden origin');
     }
 
@@ -1006,6 +1021,47 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
       const { config } = loadConfig();
       const meta: Meta = { profiles: manager.profiles(), models: config.models, saved: config.profiles.map((p) => p.id) };
       return send(res, 200, meta);
+    }
+
+    if (path === '/api/lan' || path === '/api/lan/new-link') {
+      const lan = deps.lan;
+      if (!lan) throw new HttpError(404, 'Not found');
+      // Switching off, or a new link, cuts the phones' connections: asked from a phone, the
+      // answer goes out first and the change follows. Asked here, the answer says how it went.
+      const thenAnswer = async (change: () => void | Promise<void>): Promise<void> => {
+        if (gate.local) {
+          await change();
+          return send(res, 200, lan.info());
+        }
+        send(res, 204);
+        setTimeout(() => {
+          Promise.resolve()
+            .then(change)
+            .catch((e: unknown) => deps.errors?.report({ source: 'server', error: e, context: `${method} ${path} from a phone` }));
+        }, 50);
+      };
+      if (path === '/api/lan/new-link') {
+        if (method !== 'POST') throw new HttpError(405, 'Method not allowed');
+        return thenAnswer(() => lan.newLink());
+      }
+      if (method === 'GET') return send(res, 200, lan.info());
+      if (method !== 'PUT') throw new HttpError(405, 'Method not allowed');
+      const b = await readObject(req);
+      if (typeof b.enabled !== 'boolean') throw new HttpError(400, 'Say whether phone access is on: {"enabled": true} or {"enabled": false}');
+      assertConfigWritable();
+      if (b.enabled) {
+        try {
+          await lan.start();
+        } catch (e) {
+          throw new HttpError(409, `Phone access could not start: ${(e as Error).message}`);
+        }
+      }
+      // Kept, so that phone access is as the user left it after a restart.
+      const { config } = loadConfig();
+      config.lan = { ...config.lan, enabled: b.enabled };
+      saveConfig(config);
+      if (b.enabled) return send(res, 200, lan.info());
+      return thenAnswer(() => lan.stop());
     }
 
     if (path === '/api/profiles') {

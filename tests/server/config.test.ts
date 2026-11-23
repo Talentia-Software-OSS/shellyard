@@ -20,7 +20,7 @@ describe('config', () => {
 
   it('returns defaults when there is no file', () => {
     expect(loadConfig()).toEqual({
-      config: { profiles: [], models: ['opus', 'sonnet', 'haiku'], silenceMs: 5000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null } },
+      config: { profiles: [], models: ['opus', 'sonnet', 'haiku'], silenceMs: 5000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null }, lan: { enabled: false, port: 7718 } },
       warning: null,
     });
   });
@@ -37,6 +37,7 @@ describe('config', () => {
       profileOrder: ['b', 'a'],
       soundFiles: [],
       sounds: { blocked: null, finished: null, maybeWaiting: null },
+      lan: { enabled: true, port: 7799 },
     };
     saveConfig(config);
     expect(loadConfig()).toEqual({ config, warning: null });
@@ -59,11 +60,11 @@ describe('config', () => {
   });
 
   it('while running, leaves a file being edited alone and keeps the last good settings', () => {
-    saveConfig({ profiles: [], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null } });
+    saveConfig({ profiles: [], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null }, lan: { enabled: false, port: 7718 } });
     expect(loadConfig().config.silenceMs).toBe(9000);
     writeFileSync(join(home.dir(), 'config.json'), '{"silenceMs": 90');
     const { config, warning } = loadConfig();
-    expect(config).toEqual({ profiles: [], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null } });
+    expect(config).toEqual({ profiles: [], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null }, lan: { enabled: false, port: 7718 } });
     expect(warning).toMatch(/not valid JSON/);
     expect(readFileSync(join(home.dir(), 'config.json'), 'utf8')).toBe('{"silenceMs": 90');
     expect(existsSync(join(home.dir(), 'config.json.bad'))).toBe(false);
@@ -80,7 +81,7 @@ describe('config', () => {
   it('ignores values of the wrong type instead of failing', () => {
     writeFileSync(join(home.dir(), 'config.json'), JSON.stringify({ profiles: 'x', models: 5, silenceMs: 'soon' }));
     const { config } = loadConfig();
-    expect(config).toEqual({ profiles: [], models: ['opus', 'sonnet', 'haiku'], silenceMs: 5000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null } });
+    expect(config).toEqual({ profiles: [], models: ['opus', 'sonnet', 'haiku'], silenceMs: 5000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null }, lan: { enabled: false, port: 7718 } });
   });
 });
 

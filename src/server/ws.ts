@@ -1,8 +1,8 @@
 import type { IncomingMessage, Server } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { ClientMessage, ServerMessage } from '../shared/types.js';
-import { classifyHost, originAllowed, safeEqual, tokenFromProtocols, WS_PROTOCOL } from './auth.js';
+import type { ClientMessage, LanStatus, ServerMessage } from '../shared/types.js';
+import { localGate, safeEqual, tokenFromProtocols, WS_PROTOCOL, type Gate } from './auth.js';
 import type { SessionManager } from './session-manager.js';
 import type { ActivityMeter } from './activity.js';
 import type { RuleStore } from './area-rules.js';
@@ -54,11 +54,37 @@ function parseMessage(raw: string): ClientMessage | null {
   }
 }
 
-export function attachWebSocket(
-  server: Server,
-  deps: { manager: SessionManager; stories?: StoryStore; rules?: RuleStore; closed?: ClosedStore; schedules?: ScheduleStore; usage?: UsageStore; activity?: ActivityMeter; errors?: ErrorReporter; changes?: ChangeTracker; port: number; pageHost: string; token: string },
-): { close(): void } {
+export interface WebSocketDeps {
+  manager: SessionManager;
+  stories?: StoryStore;
+  rules?: RuleStore;
+  closed?: ClosedStore;
+  schedules?: ScheduleStore;
+  usage?: UsageStore;
+  activity?: ActivityMeter;
+  errors?: ErrorReporter;
+  changes?: ChangeTracker;
+  /** The status of phone access, sent to every page so the header can say it is on. */
+  lan?: { status(): LanStatus; onChange(cb: (s: LanStatus) => void): void };
+  port: number;
+  pageHost: string;
+  token: string;
+  /** What this listener lets in; absent, the loopback listener's own (see http.ts). */
+  gate?: Gate;
+  /** A page connected or left. */
+  onClients?: () => void;
+}
+
+export interface WebSocketHandle {
+  close(): void;
+  clientCount(): number;
+  /** Closes every connected page, keeping the WebSocket server ready for new ones. */
+  disconnectAll(): void;
+}
+
+export function attachWebSocket(server: Server, deps: WebSocketDeps): WebSocketHandle {
   const { manager } = deps;
+  const gate = deps.gate ?? localGate(deps.port, deps.pageHost, deps.token);
   const wss = new WebSocketServer({
     noServer: true,
     maxPayload: 1024 * 1024,
@@ -96,6 +122,9 @@ export function attachWebSocket(
   });
   deps.changes?.onChange((changes) => {
     for (const c of clients) send(c, { t: 'changes', changes });
+  });
+  deps.lan?.onChange((lan) => {
+    for (const c of clients) send(c, { t: 'lan', lan });
   });
 
   // Usage changes with every status report; clients get at most one update per pulse.
@@ -184,19 +213,21 @@ export function attachWebSocket(
     const path = (req.url ?? '').split('?')[0];
     if (path !== '/ws') return refuse(socket, 404, 'Not Found');
     // Only the page of this start connects; a tab from an earlier start is refused as unauthorized.
-    const hostKind = classifyHost(req.headers.host, deps.port, deps.pageHost);
+    const hostKind = gate.classify(req);
     if (hostKind === 'stale-page') return refuse(socket, 401, 'Unauthorized');
     if (hostKind !== 'page') return refuse(socket, 403, 'Forbidden');
     // A page on any site can open a WebSocket to localhost; the Origin check is what stops it.
-    if (!originAllowed(req.headers.origin, deps.port, deps.pageHost)) return refuse(socket, 403, 'Forbidden');
+    if (!gate.originAllowed(req.headers.origin, req)) return refuse(socket, 403, 'Forbidden');
     // A browser cannot add headers to a WebSocket handshake, so the page offers the token as
     // a subprotocol. Unlike a cookie, it is sent only because the page chose to send it.
+    // Read at each handshake: once the phone link changes, the old one opens nothing.
     const offered = tokenFromProtocols(req.headers['sec-websocket-protocol']);
-    if (!offered || !safeEqual(offered, deps.token)) return refuse(socket, 401, 'Unauthorized');
+    if (!offered || !safeEqual(offered, gate.token())) return refuse(socket, 401, 'Unauthorized');
 
     wss.handleUpgrade(req, socket, head, (ws) => {
       const client: Client = { ws, subs: new Map() };
       clients.add(client);
+      deps.onClients?.();
       send(client, { t: 'sessions', sessions: manager.list() });
       if (deps.stories) send(client, { t: 'stories', stories: deps.stories.list() });
       if (deps.rules) send(client, { t: 'rules', rules: deps.rules.list() });
@@ -205,15 +236,26 @@ export function attachWebSocket(
       if (deps.usage) send(client, { t: 'usage', usage: deps.usage.summary() });
       if (deps.errors) send(client, { t: 'errors', errors: deps.errors.list() });
       if (deps.changes) send(client, { t: 'changes', changes: deps.changes.list() });
+      if (deps.lan) send(client, { t: 'lan', lan: deps.lan.status() });
       ws.on('message', (data, isBinary) => {
         if (!isBinary) onMessage(client, String(data));
       });
-      ws.on('close', () => clients.delete(client));
-      ws.on('error', () => clients.delete(client));
+      const leave = (): void => {
+        if (clients.delete(client)) deps.onClients?.();
+      };
+      ws.on('close', leave);
+      ws.on('error', leave);
     });
   };
 
   server.on('upgrade', onUpgrade);
+
+  const disconnectAll = (): void => {
+    const had = clients.size > 0;
+    for (const c of clients) c.ws.terminate();
+    clients.clear();
+    if (had) deps.onClients?.();
+  };
 
   return {
     close(): void {
@@ -223,5 +265,7 @@ export function attachWebSocket(
       clients.clear();
       wss.close();
     },
+    clientCount: () => clients.size,
+    disconnectAll,
   };
 }

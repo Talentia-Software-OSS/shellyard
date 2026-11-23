@@ -4740,3 +4740,52 @@ button.worktree-chip[aria-expanded='true'] {
     transition: none;
   }
 }
+
+/* Phone access: the header chip while it is on, and its dialog. */
+.phone-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 4px 14px;
+  border-radius: 10px;
+  border-color: var(--glyph-working);
+  font-weight: 600;
+}
+
+.phone-dialog .phone-qr {
+  align-self: center;
+  width: min(260px, 70vw);
+  padding: 0;
+  line-height: 0;
+}
+
+.phone-dialog .phone-qr svg {
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+.phone-dialog .phone-where code {
+  user-select: all;
+}
+
+.phone-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.phone-notes {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+@media (max-width: 900px) {
+  .phone-chip-text {
+    display: none;
+  }
+}

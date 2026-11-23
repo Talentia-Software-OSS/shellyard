@@ -96,7 +96,7 @@ describe('StoryStore', () => {
   });
 
   it('does not disturb profiles or other settings when it saves', () => {
-    saveConfig({ profiles: [profile], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null } });
+    saveConfig({ profiles: [profile], models: ['opus'], silenceMs: 9000, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: { blocked: null, finished: null, maybeWaiting: null }, lan: { enabled: false, port: 7718 } });
     new StoryStore().create({ name: 'A' });
     const { config } = loadConfig();
     expect(config.profiles).toEqual([profile]);

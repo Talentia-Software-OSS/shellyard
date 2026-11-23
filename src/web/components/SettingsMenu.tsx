@@ -7,7 +7,7 @@ import { Popover } from './Popover.js';
 import { SoundsDialog } from './SoundsDialog.js';
 
 /** Theme, effects and sound, the same choices as before, behind one button in the header. */
-export function SettingsMenu({ onRecentErrors }: { onRecentErrors: () => void }): React.JSX.Element {
+export function SettingsMenu({ onRecentErrors, onPhoneAccess }: { onRecentErrors: () => void; onPhoneAccess: () => void }): React.JSX.Element {
   const { effects, sound, themeChoice } = useStore();
   // Outside the panel, so that the dialog stays open when the panel closes.
   const [sounds, setSounds] = useState(false);
@@ -45,6 +45,15 @@ export function SettingsMenu({ onRecentErrors }: { onRecentErrors: () => void })
               }}
             >
               Sounds…
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                close();
+                onPhoneAccess();
+              }}
+            >
+              Phone access…
             </button>
             <button
               type="button"

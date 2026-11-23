@@ -1,4 +1,4 @@
-import type { AreaRule, ConversationItem, ErrorReport, FileDiff, WorktreeChanges, FlowSummary, CreateSessionRequest, FolderListing, Meta, PermissionChoice, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
+import type { AreaRule, ConversationItem, ErrorReport, FileDiff, WorktreeChanges, FlowSummary, CreateSessionRequest, FolderListing, LanInfo, Meta, PermissionChoice, Profile, Schedule, ScheduleRun, SessionInfo, SoundFile, SoundLibrary, SoundSettings, Story, TerminalBackground, TerminalFont, WorktreeListing } from '../shared/types.js';
 import type { SendOutcome } from './selection.js';
 import type { Recipe } from '../shared/recipes.js';
 
@@ -114,6 +114,11 @@ async function uploadSound(file: File): Promise<SoundFile> {
 
 export const api = {
   meta: (): Promise<Meta> => call('GET', '/api/meta'),
+  /** Phone access with its links, which carry the token. */
+  lan: (): Promise<LanInfo> => call('GET', '/api/lan'),
+  /** Asked from a phone, the change follows the answer, which is then empty. */
+  setLan: (enabled: boolean): Promise<LanInfo | undefined> => call('PUT', '/api/lan', { enabled }),
+  newLanLink: (): Promise<LanInfo | undefined> => call('POST', '/api/lan/new-link'),
   createSession: (req: CreateSessionRequest): Promise<SessionInfo> => call('POST', '/api/sessions', req),
   updateSession: (id: string, patch: { name?: string; color?: string; background?: TerminalBackground | null; font?: TerminalFont | null }): Promise<SessionInfo> =>
     call('PATCH', `/api/sessions/${encodeURIComponent(id)}`, patch),

@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { AreaRule, ChangeSummary, ClosedSession, ErrorReport, Meta, Schedule, SessionInfo, SoundFile, SoundLibrary, Story, UsageSummary } from '../shared/types.js';
+import type { AreaRule, ChangeSummary, ClosedSession, ErrorReport, LanStatus, Meta, Schedule, SessionInfo, SoundFile, SoundLibrary, Story, UsageSummary } from '../shared/types.js';
 import { api, configureApi } from './api.js';
 import { loadEffects, loadSound, saveEffects, saveSound, type EffectsLevel } from './effects.js';
 import { connect, type ConnectionState, type Socket } from './socket.js';
@@ -35,6 +35,8 @@ interface State {
   errors: ErrorReport[];
   /** The uncommitted changes of the worktrees sessions work in, by worktree path. */
   changes: Record<string, ChangeSummary>;
+  /** Phone access: on or off, where, how many connected. Null until the server has sent it. */
+  lan: LanStatus | null;
   /** What each terminal printed over the last minutes, for the lines on the board. */
   sparks: SparkHistory;
   /** Sessions picked on the board for one action on all of them, in the order picked. */
@@ -69,6 +71,7 @@ let state: State = {
   activity: {},
   errors: [],
   changes: {},
+  lan: null,
   sparks: emptyHistory(),
   selection: [],
   focus: null,
@@ -329,6 +332,7 @@ export function startStore(): void {
     for (const cb of errorListeners) cb(prev, errors);
   });
   socket.onChanges((list) => set({ changes: Object.fromEntries(list.map((c) => [c.worktree, c])) }));
+  socket.onLan((lan) => set({ lan }));
   socket.onActivity((activity) => set({ activity, sparks: recordActivity(state.sparks, activity, Date.now()) }));
   socket.onState((connection) => {
     // Once the token is known to be refused, a failing socket must not hide that message.
