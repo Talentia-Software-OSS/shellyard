@@ -4770,6 +4770,21 @@ button.worktree-chip[aria-expanded='true'] {
   user-select: all;
 }
 
+/* The dialog scrolls as a column: without this, a box that hides its overflow may shrink away. */
+.phone-dialog .phone-steps,
+.phone-dialog .phone-qr {
+  flex-shrink: 0;
+}
+
+.phone-dialog .phone-steps {
+  align-self: center;
+}
+
+.phone-dialog .phone-fingerprint code {
+  word-break: break-all;
+  font-size: 11px;
+}
+
 .phone-actions {
   display: flex;
   gap: 8px;

@@ -73,7 +73,7 @@ export interface HttpDeps {
    */
   gate?: Gate;
   /** Phone access, switched on and off from the page; absent where there is none (tests). */
-  lan?: Pick<LanAccess, 'info' | 'start' | 'stop' | 'newLink'>;
+  lan?: Pick<LanAccess, 'info' | 'start' | 'stop' | 'newLink' | 'certificate'>;
   webDir: string;
   /** The package version this server runs, so a newer app can tell it is talking to an older server. */
   version?: string;
@@ -275,6 +275,51 @@ function toStoryInput(b: Record<string, unknown>): StoryInput {
  * The page of any address other than this start's own: the app is not served there, so a
  * bookmark or an old tab says how to open it instead of failing silently.
  */
+/** Where a phone downloads the root of phone access. */
+const CERTIFICATE_PATH = '/shellyard-certificate.crt';
+
+const escapeHtml = (s: string): string => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * The page a new phone opens first (phone access): it downloads the root and says how to make
+ * the phone trust it. No script, no secret; reached once by going past the phone's warning.
+ */
+function sendSetupPage(res: ServerResponse, root: { name: string; fingerprint: string }, method: string): void {
+  const name = escapeHtml(root.name);
+  const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>ShellYard: set up this phone</title>
+<body style="font:16px/1.5 system-ui,sans-serif;margin:1.5rem;max-width:40rem;color:#1b1f27;background:#fff">
+<h1 style="font-size:1.4rem">Set up this phone for ShellYard</h1>
+<p>Once per phone: install the certificate of <b>${name}</b>. From then on this phone checks that it really talks to ShellYard on that computer, and the connection is encrypted. The certificate can only vouch for addresses on private networks, never for a website.</p>
+<p><a href="${CERTIFICATE_PATH}" style="display:inline-block;padding:.7rem 1.1rem;border-radius:8px;background:#1f4f9e;color:#fff;text-decoration:none;font-weight:600">Download the certificate</a></p>
+<h2 style="font-size:1.1rem">iPhone or iPad (Safari)</h2>
+<ol><li>Tap <b>Download the certificate</b>, then <b>Allow</b>.</li><li>Open <b>Settings</b>, tap <b>Profile Downloaded</b>, then <b>Install</b>.</li><li>Open <b>Settings › General › About › Certificate Trust Settings</b> and switch on <b>${name}</b>.</li></ol>
+<h2 style="font-size:1.1rem">Android (Chrome)</h2>
+<ol><li>Tap <b>Download the certificate</b>.</li><li>Open <b>Settings</b>, search for <b>CA certificate</b> (often under Security › Encryption &amp; credentials › Install a certificate), choose <b>CA certificate</b> and pick the file you downloaded.</li></ol>
+<p>Then, on the computer, show the second code (<b>Open ShellYard</b>) and scan it. Close this page: once the certificate is installed, the phone no longer warns, and should it ever warn about ShellYard again, do not go on.</p>
+<p style="font-size:.85rem;color:#555;word-break:break-all">Fingerprint (SHA-256), the same as on the computer and in the phone's certificate details:<br><code>${escapeHtml(root.fingerprint)}</code></p>
+</body>`;
+  res.writeHead(200, {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+  });
+  res.end(method === 'HEAD' ? undefined : html);
+}
+
+/** The root of phone access, in the form phones install as a CA certificate. */
+function sendCertificate(res: ServerResponse, der: Buffer, method: string): void {
+  res.writeHead(200, {
+    'content-type': 'application/x-x509-ca-cert',
+    'content-disposition': 'attachment; filename="ShellYard-certificate.crt"',
+    'content-length': String(der.length),
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+  });
+  res.end(method === 'HEAD' ? undefined : der);
+}
+
 function sendOpenNotice(res: ServerResponse, stale: boolean, method: string): void {
   const text = stale
     ? 'ShellYard was restarted since this page was opened. Run <code>shellyard</code> (or open the ShellYard app) to open it again.'
@@ -473,6 +518,13 @@ export function createRequestHandler(deps: HttpDeps): (req: IncomingMessage, res
     // told how to open it.
     if (!path.startsWith('/api/')) {
       if (method !== 'GET' && method !== 'HEAD') throw new HttpError(405, 'Method not allowed');
+      // A new phone's first visit: the root to install, and how. Public, like the root itself.
+      if (!gate.local && deps.lan && (path === '/setup' || path === CERTIFICATE_PATH)) {
+        const root = deps.lan.certificate();
+        if (path === '/setup') sendSetupPage(res, root, method);
+        else sendCertificate(res, root.der, method);
+        return;
+      }
       if (hostKind === 'page') serveStatic(deps.webDir, path, method, res, gate.wsOrigin(req));
       else sendOpenNotice(res, hostKind === 'stale-page', method);
       return;

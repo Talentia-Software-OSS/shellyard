@@ -1,4 +1,5 @@
-import { createServer, type Server } from 'node:http';
+import { createServer, type Server } from 'node:https';
+import { checkServerIdentity } from 'node:tls';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import WebSocket from 'ws';
 import { defaultConfig } from '../../src/server/config.js';
@@ -40,8 +41,12 @@ describe('phone access over the websocket', () => {
   const host = (): string => `${PHONE_IP}:${lan.port()}`;
   function open(o: { host?: string; origin?: string; token?: string } = {}): Promise<{ ws: WebSocket; messages: ServerMessage[] }> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${lan.port()}/ws`, ['shellyard', `shellyard-token.${o.token ?? lan.token()}`], {
-        headers: { host: o.host ?? host(), origin: o.origin ?? `http://${host()}` },
+      // Over TLS, trusting only the root and checking the phone's address, as a set-up phone does.
+      // (ws hands these to tls.connect; its typings describe checkServerIdentity otherwise.)
+      const tlsOptions: import('node:tls').ConnectionOptions = { ca: lan.certificate().pem, checkServerIdentity: (_h, cert) => checkServerIdentity(PHONE_IP, cert) };
+      const ws = new WebSocket(`wss://127.0.0.1:${lan.port()}/ws`, ['shellyard', `shellyard-token.${o.token ?? lan.token()}`], {
+        headers: { host: o.host ?? host(), origin: o.origin ?? `https://${host()}` },
+        ...(tlsOptions as object),
       });
       sockets.push(ws);
       const messages: ServerMessage[] = [];
@@ -63,7 +68,9 @@ describe('phone access over the websocket', () => {
 
   it('refuses the token of this start, another origin and a name', async () => {
     await expect(open({ token: TOKEN })).rejects.toThrow(/refused 401/);
-    await expect(open({ origin: 'http://evil.example' })).rejects.toThrow(/refused 403/);
+    await expect(open({ origin: 'https://evil.example' })).rejects.toThrow(/refused 403/);
+    // Its own address over plain HTTP is another origin.
+    await expect(open({ origin: `http://${host()}` })).rejects.toThrow(/refused 403/);
     await expect(open({ host: `evil.example:${lan.port()}`, origin: `http://evil.example:${lan.port()}` })).rejects.toThrow(/refused 403/);
     await expect(open({ host: `${PAGE}:${lan.port()}`, origin: `http://${PAGE}:${lan.port()}` })).rejects.toThrow(/refused 403/);
   });

@@ -9,11 +9,25 @@ import { useStore } from '../store.js';
 /** Margin around the QR code, in modules: readers need a quiet zone of four. */
 const QUIET = 4;
 
-/** Phone access: switch it on, scan the link, make a new one. */
+function QrCode({ text, label }: { text: string; label: string }): React.JSX.Element {
+  const qr = useMemo(() => qrPath(text), [text]);
+  const side = qr.size + 2 * QUIET;
+  return (
+    <div className="phone-qr">
+      <svg viewBox={`${-QUIET} ${-QUIET} ${side} ${side}`} shapeRendering="crispEdges" role="img" aria-label={label}>
+        <rect x={-QUIET} y={-QUIET} width={side} height={side} fill="#fff" />
+        <path d={qr.d} fill="#000" />
+      </svg>
+    </div>
+  );
+}
+
+/** Phone access: switch it on, set up a new phone once, scan the link, make a new one. */
 export function PhoneDialog({ onClose }: { onClose: () => void }): React.JSX.Element {
   const { lan } = useStore();
   const [info, setInfo] = useState<LanInfo | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
+  const [step, setStep] = useState<'setup' | 'open'>('setup');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -50,7 +64,6 @@ export function PhoneDialog({ onClose }: { onClose: () => void }): React.JSX.Ele
   const enabled = info?.enabled ?? lan?.enabled ?? false;
   const links = info?.links ?? [];
   const link = links.find((l) => l.ip === picked) ?? links[0] ?? null;
-  const qr = useMemo(() => (link ? qrPath(link.url) : null), [link?.url]);
   const clients = lan?.clients ?? info?.clients ?? 0;
 
   const copy = async (): Promise<void> => {
@@ -86,7 +99,7 @@ export function PhoneDialog({ onClose }: { onClose: () => void }): React.JSX.Ele
         {enabled && links.length === 0 && (
           <p className="hint">This computer has no address on a local network right now. Connect it to your Wi-Fi and it shows up here.</p>
         )}
-        {enabled && link && qr && (
+        {enabled && link && info && (
           <>
             {links.length > 1 && (
               <label>
@@ -100,39 +113,53 @@ export function PhoneDialog({ onClose }: { onClose: () => void }): React.JSX.Ele
                 </select>
               </label>
             )}
-            <div className="phone-qr">
-              <svg
-                viewBox={`${-QUIET} ${-QUIET} ${qr.size + 2 * QUIET} ${qr.size + 2 * QUIET}`}
-                shapeRendering="crispEdges"
-                role="img"
-                aria-label={`QR code of the link on ${link.ip}`}
-              >
-                <rect x={-QUIET} y={-QUIET} width={qr.size + 2 * QUIET} height={qr.size + 2 * QUIET} fill="#fff" />
-                <path d={qr.d} fill="#000" />
-              </svg>
-            </div>
-            <p className="hint phone-where">
-              Scan it with the phone's camera. It opens <code>http://{link.ip}:{info?.port}</code> with the key to get in.
-              {clients > 0 ? ` ${clients} ${clients === 1 ? 'page is' : 'pages are'} connected now.` : ''}
-            </p>
-            <div className="phone-actions">
-              <button type="button" onClick={() => void copy()}>
-                {copied ? 'Copied' : 'Copy link'}
+            <div className="segmented phone-steps" role="group" aria-label="Step">
+              <button type="button" className={step === 'setup' ? 'active' : undefined} aria-pressed={step === 'setup'} onClick={() => setStep('setup')}>
+                1 · New phone
               </button>
-              <button type="button" disabled={busy} onClick={() => void run(() => api.newLanLink())} title="Every device using the current link is disconnected">
-                New link
+              <button type="button" className={step === 'open' ? 'active' : undefined} aria-pressed={step === 'open'} onClick={() => setStep('open')}>
+                2 · Open ShellYard
               </button>
             </div>
+            {step === 'setup' ? (
+              <>
+                <QrCode text={link.setupUrl} label={`QR code of the setup page on ${link.ip}`} />
+                <p className="hint phone-where">
+                  Once per phone: it installs ShellYard's certificate, so the phone can check it is talking to this computer. The phone first warns that the connection is not
+                  private, because it does not know the certificate yet: this once, go on (Android: <b>Advanced › Proceed</b>; iPhone: <b>Show Details › visit this website</b>) and
+                  follow the page. Then come back to step 2.
+                </p>
+                <p className="hint phone-fingerprint">
+                  {info.certificate.name}, fingerprint <code>{info.certificate.fingerprint}</code>
+                </p>
+              </>
+            ) : (
+              <>
+                <QrCode text={link.url} label={`QR code of the link on ${link.ip}`} />
+                <p className="hint phone-where">
+                  Scan it with the phone's camera. It opens <code>https://{link.ip}:{info.port}</code> with the key to get in.
+                  {clients > 0 ? ` ${clients} ${clients === 1 ? 'page is' : 'pages are'} connected now.` : ''}
+                </p>
+                <div className="phone-actions">
+                  <button type="button" onClick={() => void copy()}>
+                    {copied ? 'Copied' : 'Copy link'}
+                  </button>
+                  <button type="button" disabled={busy} onClick={() => void run(() => api.newLanLink())} title="Every device using the current link is disconnected">
+                    New link
+                  </button>
+                </div>
+              </>
+            )}
           </>
         )}
         <ul className="hint phone-notes">
           <li>Whoever has the link controls your sessions as you do here. Keep it to yourself; <b>New link</b> disconnects every device that has the old one.</li>
-          <li>The connection is protected only by your network's own encryption: use it on your own Wi-Fi, and switch it off elsewhere.</li>
+          <li>The connection is encrypted, and once the certificate is installed the phone checks it is talking to this computer. Should it ever warn about ShellYard after that, do not go on.</li>
           <li>
             If the phone shows a blank page or cannot connect, this computer's firewall is blocking Node.js: allow it on private networks. Windows asks only once; if that was
             refused, a Block rule for node.exe stays in its firewall's inbound rules.
           </li>
-          <li>On the phone, browsers keep notifications and the clipboard for secure addresses, so those two are not available there.</li>
+          <li>Notifications are not shown on the phone: phone browsers keep them for installed apps.</li>
         </ul>
         <div className="dialog-buttons">
           <button type="button" onClick={onClose}>

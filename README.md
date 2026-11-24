@@ -400,19 +400,33 @@ a small screen.
 
 1. Open the sliders button at the right end of the header (**Theme, effects and sound**), choose
    **Phone access…**, then tick **Let devices on this network open ShellYard**.
-2. Scan the QR code with the phone's camera. It opens `http://<your computer's IP>:7718` with the
-   key to get in; the phone keeps it, so a bookmark or a home-screen icon works from then on.
+2. **Once per phone, step 1 · New phone:** scan the first QR code. The phone warns that the
+   connection is not private, because it does not know ShellYard's certificate yet: this once,
+   go on (Android: *Advanced › Proceed*; iPhone: *Show Details › visit this website*). The page
+   that opens downloads the certificate and says how to install it:
+   - iPhone or iPad: *Settings › Profile Downloaded › Install*, then *Settings › General › About ›
+     Certificate Trust Settings*, and switch on *ShellYard on <your computer>*;
+   - Android: *Settings*, search for *CA certificate*, and install the downloaded file as a CA
+     certificate.
+3. **Step 2 · Open ShellYard:** scan the second QR code. It opens
+   `https://<your computer's IP>:7718` with the key to get in; the phone keeps it, so a bookmark
+   or a home-screen icon works from then on.
 
 While it is on, a phone icon in the header says so, with the number of devices connected; click
 it to open the same dialog. When the computer is on several networks (Wi-Fi and Ethernet, or
 WSL's virtual network), choose the one the phone is on. **New link** makes a new key: every device
 using the old one is disconnected. Untick the box to switch it off; it stays as you left it
-across restarts.
+across restarts. The phone keeps trusting the certificate when your computer's address changes:
+ShellYard makes the computer's certificate again by itself.
 
 Things to know:
 
-- Whoever has the link controls your sessions as you do on the computer. The connection is not
-  encrypted beyond your network's own: use it on networks you trust (see [Security](#security)).
+- Whoever has the link controls your sessions as you do on the computer: keep it to yourself.
+  The connection is encrypted, and once the certificate is installed the phone checks that it is
+  talking to your computer. **If the phone ever warns about ShellYard's certificate after the
+  first setup, do not go on** (see [Security](#security)).
+- The certificate is ShellYard's own: nothing is bought, nothing is sent anywhere. It can only
+  vouch for addresses on private networks, never for a website.
 - The first time, Windows asks whether Node.js may accept connections: allow it on **private**
   networks. If the phone shows a blank page or cannot connect, that is the first thing to check.
   Windows asks only once: if the question was refused (even long ago, for another program run
@@ -420,8 +434,10 @@ Things to know:
   with Advanced Security* › *Inbound Rules*, and it wins over any rule that allows. Disable it,
   then allow TCP port 7718 on private networks, for instance from an administrator PowerShell:
   `New-NetFirewallRule -DisplayName "ShellYard phone access" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 7718 -Profile Private -Program "<path of node.exe>"`.
-- On the phone, browsers keep notifications and the clipboard for secure (HTTPS) addresses, so
-  those are not available there. Keep the page open on the phone to follow your sessions.
+- Notifications are not shown on the phone: phone browsers keep them for installed apps. Keep the
+  page open on the phone to follow your sessions.
+- Firefox on Android ignores certificates installed in Android's settings unless told to use
+  them; use Chrome, or Samsung Internet.
 - The port is 7718, or the next free one. Another can be set as `"lan": { "port": 7800 }` in
   `config.json`.
 
@@ -613,6 +629,7 @@ Everything is in `~/.shellyard/`:
 | `usage.json` | Usage history: cost and tokens per day, model and story (90 days), and how far each of Claude Code's conversation files has been read |
 | `open.html` | The private page `shellyard` opens in your browser (readable by you only) |
 | `lan.json` | The key of the [Phone access](#phone-access) link, made the first time it is switched on (readable by you only) |
+| `lan-ca.json` | The root certificate of phone access and its key, which phones trust once (readable by you only) |
 | `run/` | Per-session settings files, removed when a session ends |
 | `errors/` | One report per unexpected error, the newest fifty (see [When something goes wrong](#when-something-goes-wrong)) |
 
@@ -664,17 +681,25 @@ Phone access, while it is on, is a second door, held to rules of its own:
 - it does not serve Claude Code's hooks and status reports, the shutdown, or the health check's
   proof: those are for the programs of this computer;
 - **New link** replaces its token: every device holding the old one is disconnected at once and
-  refused from then on.
+  refused from then on;
+- it speaks HTTPS only. Its certificate is signed by a root that ShellYard makes for your
+  computer (`lan-ca.json`, readable by you only) and that each phone trusts once. The page, your
+  terminals and the token cross the network encrypted, and a phone that trusts the root refuses
+  anything else that answers on that address (another program holding the port while ShellYard
+  is off, another device taking your computer's address) before sending it the token;
+- the root carries a name constraint: it can vouch only for addresses in the private ranges
+  above and for no DNS name at all. Even with its key, a phone that trusts it accepts nothing it
+  signs for a website. It is made with Node's own crypto (ECDSA P-256), without a dependency.
 
 What it does not protect against:
 
-- the connection is plain HTTP. On your network, the page, your terminals and the link travel
-  as protected as the network makes them (WPA2/WPA3 on a Wi-Fi with a password). Someone who
-  can read that traffic, or who has the link, has a shell as you;
-- the phone keeps the link for its address (`http://<computer's IP>:7718`). On a network you
-  do not control, another device that takes your computer's address while it is away could
-  serve a page there and read it. Use phone access on networks you trust, switch it off
-  elsewhere, and press **New link** if in doubt;
+- the first setup: the phone downloads the root before it can check anything. On a network you
+  trust that is the moment to do it; the fingerprint shown under step 1 on the computer is the
+  one the phone shows in the certificate's details, if you want to compare;
+- going past a certificate warning later. Once a phone trusts the root it has no reason to warn
+  about ShellYard; a warning means something else is answering on that address. Going on hands
+  it the page's storage, link included: do not, and press **New link**;
+- whoever has the link, or a program running as you (it can read `lan.json` and `lan-ca.json`);
 - the link outlives restarts (it is kept in `lan.json`) until you make a new one.
 
 If you edit `config.json` by hand and it is not valid JSON at that moment, ShellYard keeps using the

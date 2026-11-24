@@ -405,7 +405,10 @@ export interface LanStatus {
 
 /** The status plus the links themselves, which carry the token: only answered to a page that asks. */
 export interface LanInfo extends LanStatus {
-  links: Array<LanAddress & { url: string }>;
+  /** Per address: `url` opens ShellYard (with the token), `setupUrl` installs the root on a new phone. */
+  links: Array<LanAddress & { url: string; setupUrl: string }>;
+  /** The root each phone trusts once, as its settings will show it. */
+  certificate: { name: string; fingerprint: string };
 }
 
 export type ServerMessage =

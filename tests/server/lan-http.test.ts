@@ -1,7 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer, request, type Server } from 'node:http';
+import { createServer as createHttpsServer, request as httpsRequest, type Server as HttpsServer } from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
+import { checkServerIdentity } from 'node:tls';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { newChallenge } from '../../src/server/auth.js';
 import { ClosedStore } from '../../src/server/closed.js';
@@ -27,35 +29,48 @@ interface Res {
   json: () => any;
 }
 
-/** A raw request to 127.0.0.1:port with any Host, token and Origin. */
-function call(port: number, method: string, path: string, o: { host: string; token?: string; hookToken?: string; origin?: string; body?: string }): Promise<Res> {
+type CallOptions = { host: string; token?: string; hookToken?: string; origin?: string; body?: string; binary?: boolean };
+
+/**
+ * A raw request to 127.0.0.1:port with any Host, token and Origin. With `tls`, over HTTPS,
+ * trusting only that root and checking the certificate for the phone's address, as a phone does.
+ */
+function call(port: number, method: string, path: string, o: CallOptions, tls?: { ca: string }): Promise<Res & { body: Buffer }> {
   const headers: Record<string, string> = { host: o.host };
   if (o.token) headers['x-shellyard-token'] = o.token;
   if (o.hookToken) headers['x-shellyard-hook-token'] = o.hookToken;
   if (o.origin) headers.origin = o.origin;
   if (o.body !== undefined) headers['content-length'] = String(Buffer.byteLength(o.body));
   return new Promise((resolve, reject) => {
-    const req = request({ host: '127.0.0.1', port, method, path, headers }, (res) => {
-      let text = '';
-      res.on('data', (d) => (text += d));
-      res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, text, json: () => JSON.parse(text) }));
-    });
+    const options = { host: '127.0.0.1', port, method, path, headers };
+    const onResponse = (res: import('node:http').IncomingMessage): void => {
+      const chunks: Buffer[] = [];
+      res.on('data', (d: Buffer) => chunks.push(d));
+      res.on('end', () => {
+        const body = Buffer.concat(chunks);
+        const text = body.toString('utf8');
+        resolve({ status: res.statusCode ?? 0, headers: res.headers, text, body, json: () => JSON.parse(text) });
+      });
+    };
+    const req = tls
+      ? httpsRequest({ ...options, ca: tls.ca, checkServerIdentity: (_h, cert) => checkServerIdentity(PHONE_IP, cert) }, onResponse)
+      : request(options, onResponse);
     req.on('error', reject);
     req.end(o.body);
   });
 }
 
-describe('phone access over http', () => {
+describe('phone access over https', () => {
   const home = useTempHome();
   let local: Server;
-  let lanServer: Server;
+  let lanServer: HttpsServer;
   let localPort = 0;
   let lan: LanAccess;
   let shutdowns = 0;
 
   const lanHost = (): string => `${PHONE_IP}:${lan.port()}`;
-  const onLan = (method: string, path: string, o: { token?: string; hookToken?: string; origin?: string; body?: string; host?: string } = {}): Promise<Res> =>
-    call(lan.port(), method, path, { host: lanHost(), ...o });
+  const onLan = (method: string, path: string, o: { token?: string; hookToken?: string; origin?: string; body?: string; host?: string } = {}): Promise<Res & { body: Buffer }> =>
+    call(lan.port(), method, path, { host: lanHost(), ...o }, { ca: lan.certificate().pem });
   const onLocal = (method: string, path: string, o: { token?: string; origin?: string; body?: string } = {}): Promise<Res> =>
     call(localPort, method, path, { host: `${PAGE}:${localPort}`, ...o });
 
@@ -81,8 +96,8 @@ describe('phone access over http', () => {
       gitOf: async () => null,
       headOf: () => null,
     });
-    lanServer = createServer();
-    lan = new LanAccess({ server: lanServer, preferredPort: () => 0, host: '127.0.0.1', addresses: () => [{ name: 'Wi-Fi', ip: PHONE_IP }] });
+    lanServer = createHttpsServer();
+    lan = new LanAccess({ server: lanServer, preferredPort: () => 0, host: '127.0.0.1', addresses: () => [{ name: 'Wi-Fi', ip: PHONE_IP }], authorityName: 'ShellYard on TEST' });
     const deps: HttpDeps = {
       manager,
       stories,
@@ -111,7 +126,37 @@ describe('phone access over http', () => {
     const r = await onLan('GET', '/');
     expect(r.status).toBe(200);
     expect(r.text).toContain('ShellYard APP');
-    expect(String(r.headers['content-security-policy'])).toContain(`connect-src 'self' ws://${lanHost()};`);
+    expect(String(r.headers['content-security-policy'])).toContain(`connect-src 'self' wss://${lanHost()};`);
+  });
+
+  it('speaks HTTPS only: a plain HTTP request gets nothing', async () => {
+    const plain = await call(lan.port(), 'GET', '/', { host: lanHost() }).then(
+      (r) => r.status,
+      () => 'refused',
+    );
+    expect(plain === 'refused' || (typeof plain === 'number' && plain >= 400)).toBe(true);
+  });
+
+  it('serves a new phone the setup page and the root, without the token', async () => {
+    const page = await onLan('GET', '/setup');
+    expect(page.status).toBe(200);
+    expect(page.text).toContain('ShellYard on TEST');
+    expect(page.text).toContain(lan.certificate().fingerprint);
+    expect(page.text).toContain('href="/shellyard-certificate.crt"');
+    expect(page.text).not.toContain(lan.token());
+    expect(page.text).not.toContain('<script');
+    expect(String(page.headers['content-security-policy'])).toContain("default-src 'none'");
+
+    const cert = await onLan('GET', '/shellyard-certificate.crt');
+    expect(cert.status).toBe(200);
+    expect(cert.headers['content-type']).toBe('application/x-x509-ca-cert');
+    expect(cert.body.equals(lan.certificate().der)).toBe(true);
+  });
+
+  it('the setup page and the root are for the phone listener only', async () => {
+    const page = await onLocal('GET', '/setup');
+    expect(page.text).not.toContain('Set up this phone');
+    expect((await onLocal('GET', '/shellyard-certificate.crt')).headers['content-type']).not.toBe('application/x-x509-ca-cert');
   });
 
   it('takes the phone token, and neither nothing nor the token of this start', async () => {
@@ -147,13 +192,18 @@ describe('phone access over http', () => {
 
   it('lets its own origin change things and refuses another one', async () => {
     const body = JSON.stringify({ kind: 'shell', command: process.execPath, cwd: home.dir() });
-    expect((await onLan('POST', '/api/sessions', { token: lan.token(), origin: 'http://evil.example', body })).status).toBe(403);
-    expect((await onLan('POST', '/api/sessions', { token: lan.token(), origin: `http://${lanHost()}`, body })).status).toBe(201);
+    expect((await onLan('POST', '/api/sessions', { token: lan.token(), origin: 'https://evil.example', body })).status).toBe(403);
+    expect((await onLan('POST', '/api/sessions', { token: lan.token(), origin: `http://${lanHost()}`, body })).status).toBe(403);
+    expect((await onLan('POST', '/api/sessions', { token: lan.token(), origin: `https://${lanHost()}`, body })).status).toBe(201);
   });
 
   it('switches on and off from the page, and keeps the choice in config.json', async () => {
     const info = (await onLocal('GET', '/api/lan', { token: TOKEN })).json();
-    expect(info).toMatchObject({ enabled: true, links: [{ name: 'Wi-Fi', ip: PHONE_IP, url: `http://${lanHost()}/#token=${lan.token()}` }] });
+    expect(info).toMatchObject({
+      enabled: true,
+      links: [{ name: 'Wi-Fi', ip: PHONE_IP, url: `https://${lanHost()}/#token=${lan.token()}`, setupUrl: `https://${lanHost()}/setup` }],
+      certificate: { name: 'ShellYard on TEST', fingerprint: lan.certificate().fingerprint },
+    });
 
     const port = lan.port();
     const off = await onLocal('PUT', '/api/lan', { token: TOKEN, body: JSON.stringify({ enabled: false }) });
@@ -161,7 +211,7 @@ describe('phone access over http', () => {
     expect(off.json()).toMatchObject({ enabled: false, links: [] });
     expect(lan.enabled).toBe(false);
     expect(loadConfig().config.lan.enabled).toBe(false);
-    await expect(call(port, 'GET', '/', { host: `${PHONE_IP}:${port}` })).rejects.toThrow();
+    await expect(call(port, 'GET', '/', { host: `${PHONE_IP}:${port}` }, { ca: lan.certificate().pem })).rejects.toThrow();
 
     const on = await onLocal('PUT', '/api/lan', { token: TOKEN, body: JSON.stringify({ enabled: true }) });
     expect(on.status).toBe(200);
@@ -181,7 +231,7 @@ describe('phone access over http', () => {
 
   it('asked from a phone, answers first, then makes the new link', async () => {
     const old = lan.token();
-    const r = await onLan('POST', '/api/lan/new-link', { token: old, origin: `http://${lanHost()}` });
+    const r = await onLan('POST', '/api/lan/new-link', { token: old, origin: `https://${lanHost()}` });
     expect(r.status).toBe(204);
     await waitUntil(() => lan.token() !== old);
   });

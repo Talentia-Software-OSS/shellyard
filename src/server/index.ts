@@ -1,5 +1,6 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,8 +80,9 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const pageHost = newPageHost();
   const startedAt = Date.now();
   const here = dirname(fileURLToPath(import.meta.url));
-  // Phone access: a listener of its own on the local network, started only while switched on.
-  const lanServer = createServer();
+  // Phone access: an HTTPS listener of its own on the local network, started only while
+  // switched on; LanAccess gives it its certificate.
+  const lanServer = createHttpsServer();
   const lan = new LanAccess({ server: lanServer, preferredPort: () => loadConfig().config.lan.port });
   const errors = new ErrorReporter({
     dir: errorsDir(dataDir()),
