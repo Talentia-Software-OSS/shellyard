@@ -14,7 +14,9 @@ import { TicketDialog } from './components/TicketDialog.js';
 import { UsageView } from './components/UsageView.js';
 import { NewSessionDialog } from './components/NewSessionDialog.js';
 import { Sidebar } from './components/Sidebar.js';
-import { MenuIcon, SearchIcon } from './components/icons.js';
+import { MenuIcon, PhoneIcon, SearchIcon } from './components/icons.js';
+import { PhoneDialog } from './components/PhoneDialog.js';
+import { onPhoneLink } from './phone.js';
 import { SingleTerminal, TerminalsGrid } from './components/TerminalsGrid.js';
 import { useEscape } from './escape.js';
 import { paletteKey } from './palette.js';
@@ -22,7 +24,8 @@ import { selectCounts } from './selectors.js';
 import { useStore } from './store.js';
 
 export function App(): React.JSX.Element {
-  const { sessions, stories, view, connection } = useStore();
+  const { sessions, stories, view, connection, lan } = useStore();
+  const [phoneDialog, setPhoneDialog] = useState(false);
   const [dialog, setDialog] = useState<{ storyId?: string } | null>(null);
   const [palette, setPalette] = useState(false);
   const [areaDialog, setAreaDialog] = useState(false);
@@ -61,8 +64,14 @@ export function App(): React.JSX.Element {
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
+  // On a phone, the way back is the QR code on the computer, not a command.
   if (connection === 'unauthorized') {
-    return (
+    return onPhoneLink() ? (
+      <main className="down">
+        <h1>This link no longer opens ShellYard</h1>
+        <p>A new link was made on the computer. Scan its QR code again: on the computer, the sliders button at the right of the header, then Phone access…</p>
+      </main>
+    ) : (
       <main className="down">
         <h1>Open ShellYard from a terminal</h1>
         <p>
@@ -73,7 +82,12 @@ export function App(): React.JSX.Element {
   }
 
   if (connection === 'down') {
-    return (
+    return onPhoneLink() ? (
+      <main className="down">
+        <h1>The computer cannot be reached</h1>
+        <p>Phone access may be switched off, or the computer asleep or on another network. This page reconnects by itself.</p>
+      </main>
+    ) : (
       <main className="down">
         <h1>ShellYard is not running</h1>
         <p>
@@ -102,8 +116,20 @@ export function App(): React.JSX.Element {
             <kbd className="key">Ctrl K</kbd>
           </button>
           <Cluster />
+          {lan?.enabled && (
+            <button
+              type="button"
+              className="phone-chip"
+              onClick={() => setPhoneDialog(true)}
+              title="Phone access is on: devices on this network with the link can open ShellYard"
+              aria-label={`Phone access is on, ${lan.clients} connected`}
+            >
+              <PhoneIcon size={18} />
+              <span className="phone-chip-text">{lan.clients > 0 ? `${lan.clients} connected` : 'Phone access'}</span>
+            </button>
+          )}
           <FocusSwitch />
-          <SettingsMenu onRecentErrors={() => setErrorsDialog(true)} />
+          <SettingsMenu onRecentErrors={() => setErrorsDialog(true)} onPhoneAccess={() => setPhoneDialog(true)} />
         </header>
         {connection !== 'open' && (
           <div className="banner" role="status">
@@ -125,6 +151,7 @@ export function App(): React.JSX.Element {
       {areaDialog && <StoryDialog onClose={() => setAreaDialog(false)} />}
       {ticketDialog && <TicketDialog onClose={() => setTicketDialog(false)} />}
       {errorsDialog && <RecentErrorsDialog onClose={() => setErrorsDialog(false)} />}
+      {phoneDialog && <PhoneDialog onClose={() => setPhoneDialog(false)} />}
       <ErrorNotices onShowAll={() => setErrorsDialog(true)} />
       {palette && (
         <CommandPalette

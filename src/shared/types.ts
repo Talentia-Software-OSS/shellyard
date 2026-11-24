@@ -384,6 +384,33 @@ export interface ErrorReport {
   seen: boolean;
 }
 
+/** An address of this computer on a local network, with the name of its network adapter. */
+export interface LanAddress {
+  name: string;
+  ip: string;
+}
+
+/** Phone access: a second listener on the local network, off unless the user turns it on. */
+export interface LanStatus {
+  enabled: boolean;
+  /** The port it listens on (when off, the one it will try first). */
+  port: number;
+  /** This computer's addresses on private networks, the likeliest (Wi-Fi, Ethernet) first. */
+  addresses: LanAddress[];
+  /** Pages connected through it right now. */
+  clients: number;
+  /** Changes whenever the link changes (a new link, a new port), so a shown QR code can be refreshed. */
+  revision: number;
+}
+
+/** The status plus the links themselves, which carry the token: only answered to a page that asks. */
+export interface LanInfo extends LanStatus {
+  /** Per address: `url` opens ShellYard (with the token), `setupUrl` installs the root on a new phone. */
+  links: Array<LanAddress & { url: string; setupUrl: string }>;
+  /** The root each phone trusts once, as its settings will show it. */
+  certificate: { name: string; fingerprint: string };
+}
+
 export type ServerMessage =
   | { t: 'sessions'; sessions: SessionInfo[] }
   | { t: 'schedules'; schedules: Schedule[] }
@@ -397,6 +424,8 @@ export type ServerMessage =
   | { t: 'errors'; errors: ErrorReport[] }
   /** The uncommitted changes of the worktrees sessions work in; a worktree without any is absent. */
   | { t: 'changes'; changes: ChangeSummary[] }
+  /** Whether phone access is on, where, and how many phones are connected. Never carries the link. */
+  | { t: 'lan'; lan: LanStatus }
   /** The screen of a session, and the size it was taken at. */
   | { t: 'snapshot'; id: string; data: string; cols: number; rows: number }
   | { t: 'output'; id: string; data: string }

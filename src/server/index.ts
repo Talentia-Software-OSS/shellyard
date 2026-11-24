@@ -1,5 +1,6 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 import type { AddressInfo } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +12,9 @@ import { StatusLog } from './status-log.js';
 import { ClosedStore } from './closed.js';
 import { clearServerState, dataDir, loadConfig, logPath, readServerState, writeServerState } from './config.js';
 import { openInEditor } from './editor.js';
-import { createRequestHandler } from './http.js';
+import { createRequestHandler, type HttpDeps } from './http.js';
+import { LanAccess, lanGate } from './lan.js';
+import { listenOnFirstFree } from './listen.js';
 import { realPtyFactory, type PtyFactory } from './pty-session.js';
 import { claudeProjectsDir, findConversation } from './conversations.js';
 import { TranscriptScanner } from './transcript-usage.js';
@@ -35,7 +38,6 @@ export function packageVersion(): string {
   return (JSON.parse(readFileSync(file, 'utf8')) as { version: string }).version;
 }
 const HOST = '127.0.0.1';
-const PORT_ATTEMPTS = 51;
 /** How much transcript is read in one go; small enough not to be felt while typing. */
 const SCAN_STEP_BYTES = 4 * 1024 * 1024;
 const SCAN_BUSY_MS = 100;
@@ -62,32 +64,6 @@ export interface StartOptions {
   openEditor?: typeof openInEditor;
 }
 
-function listen(server: Server, port: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(port, HOST, () => {
-      server.off('error', reject);
-      resolve();
-    });
-  });
-}
-
-/**
- * Binds the server itself to the first free port from `start`. Probing a port and binding
- * it afterwards leaves a gap in which another program can take it, so the real bind is the test.
- */
-async function listenOnFirstFree(server: Server, start: number): Promise<number> {
-  for (let port = start; port < start + PORT_ATTEMPTS && port <= 65535; port++) {
-    try {
-      await listen(server, port);
-      return port;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EADDRINUSE' && (e as NodeJS.ErrnoException).code !== 'EACCES') throw e;
-    }
-  }
-  throw new Error(`No free port between ${start} and ${start + PORT_ATTEMPTS - 1}`);
-}
-
 export async function startServer(opts: StartOptions = {}): Promise<RunningServer> {
   const log = (msg: string): void => {
     if (!opts.quiet) console.log(`${new Date().toISOString()} ${msg}`);
@@ -97,19 +73,23 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   if (first.warning) log(`warning: ${first.warning}`);
 
   const server = createServer();
-  const port = await listenOnFirstFree(server, opts.port ?? DEFAULT_PORT);
+  const port = await listenOnFirstFree(server, opts.port ?? DEFAULT_PORT, HOST);
   const token = newToken();
   const hookToken = newToken();
   // A new host name for the page at every start: see newPageHost.
   const pageHost = newPageHost();
   const startedAt = Date.now();
   const here = dirname(fileURLToPath(import.meta.url));
+  // Phone access: an HTTPS listener of its own on the local network, started only while
+  // switched on; LanAccess gives it its certificate.
+  const lanServer = createHttpsServer();
+  const lan = new LanAccess({ server: lanServer, preferredPort: () => loadConfig().config.lan.port });
   const errors = new ErrorReporter({
     dir: errorsDir(dataDir()),
     now: Date.now,
     version: packageVersion(),
     // The page's host name is a secret too: whoever knows it can serve a page there.
-    secrets: () => [token, hookToken, pageHost.split('.')[0]!],
+    secrets: () => [token, hookToken, pageHost.split('.')[0]!, ...(lan.knownToken() ? [lan.knownToken()!] : [])],
     logTail: () => readLogTail(40),
   });
   activeReporter = errors;
@@ -260,7 +240,10 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
   const stopped = new Promise<void>((r) => (resolveStopped = r));
   let stopping: Promise<void> | null = null;
 
-  const ws = attachWebSocket(server, { manager, stories, rules, closed, schedules, usage, activity, errors, changes, port, pageHost, token });
+  const wsDeps = { manager, stories, rules, closed, schedules, usage, activity, errors, changes, lan, port, pageHost, token };
+  const ws = attachWebSocket(server, wsDeps);
+  const lanWs = attachWebSocket(lanServer, { ...wsDeps, gate: lanGate(lan), onClients: () => lan.changed() });
+  lan.attachSockets(lanWs);
   const ticker = setInterval(() => {
     manager.tick();
     schedules.tick();
@@ -291,6 +274,9 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       usage.flush();
       flow.observe([]);
       flow.persist();
+      // An orderly stop, not the user switching it off: config.json keeps it as it was.
+      await lan.stop().catch((e: unknown) => log(`phone access: could not stop: ${(e as Error).message}`));
+      lanWs.close();
       ws.close();
       server.closeAllConnections();
       await new Promise<void>((r) => server.close(() => r()));
@@ -305,9 +291,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
     return stopping;
   };
 
-  server.on(
-    'request',
-    createRequestHandler({
+  const httpDeps: HttpDeps = {
       manager,
       stories,
       sounds,
@@ -330,6 +314,7 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
         if (worktree) changes.soon(worktree);
       },
       changes,
+      lan,
       port,
       pageHost,
       token,
@@ -338,11 +323,22 @@ export async function startServer(opts: StartOptions = {}): Promise<RunningServe
       version: packageVersion(),
       // Let the 204 reach the caller before the sockets are torn down.
       onShutdown: () => void setTimeout(() => void stop(), 50),
-    }),
-  );
+  };
+  server.on('request', createRequestHandler(httpDeps));
+  lanServer.on('request', createRequestHandler({ ...httpDeps, gate: lanGate(lan) }));
 
   writeServerState({ pid: process.pid, port, pageHost, token, hookToken, startedAt });
   log(`listening on http://${HOST}:${port}, page on http://${pageHost}:${port}`);
+  // Left on at the last stop: on again. Not being able to is said in the log, never fatal.
+  if (first.config.lan.enabled) {
+    try {
+      await lan.start();
+      log(`phone access on port ${lan.port()} (${lan.status().addresses.map((a) => a.ip).join(', ') || 'no local network address yet'})`);
+    } catch (e) {
+      log(`phone access: could not start: ${(e as Error).message}`);
+    }
+  }
+  lan.onChange((s) => log(s.enabled ? `phone access: on, port ${s.port}, ${s.clients} connected` : 'phone access: off'));
 
   return { port, pageHost, token, address: (server.address() as AddressInfo).address, errors, stop, stopped };
 }

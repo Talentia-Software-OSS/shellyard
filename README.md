@@ -13,9 +13,11 @@ window: your profile, your PATH, your permissions. The page is its screen and ke
 > **Is it safe?** ShellYard stays on your machine and is built so that nothing else can use it:
 > - **Nothing leaves your PC.** The server listens on `127.0.0.1` only: no other computer can
 >   reach it, and ShellYard itself sends nothing to the internet (the programs you run in it, such
->   as Claude Code, connect as they always do). The one exception is yours to make: the desktop
+>   as Claude Code, connect as they always do). The exceptions are yours to make: the desktop
 >   app asks GitHub whether a newer version is out when you choose **Check for updates…**, or
->   once a day if you turn the automatic check on (it is off until you do).
+>   once a day if you turn the automatic check on (it is off until you do); and
+>   [Phone access](#phone-access), off until you switch it on, lets the devices of your local
+>   network that have its link open the page.
 > - **Only your page gets in.** Every request that does something needs a secret token, created
 >   anew at each start; requests from other websites or other host names are refused.
 > - **No cookies.** The token is never kept in a cookie, so it is never sent to anything else.
@@ -390,6 +392,55 @@ folder (seen there as `/mnt/c/...`) or the Linux home. VS Code is found through 
 on the PATH. The folder is the one the session started in: where its shell has moved to since is
 not known to ShellYard.
 
+### Phone access
+
+ShellYard can also be opened from a phone or tablet on the same network as your computer, your
+home Wi-Fi for instance: the same board, terminals and answers as on the computer, laid out for
+a small screen.
+
+1. Open the sliders button at the right end of the header (**Theme, effects and sound**), choose
+   **Phone access…**, then tick **Let devices on this network open ShellYard**.
+2. **Once per phone, step 1 · New phone:** scan the first QR code. The phone warns that the
+   connection is not private, because it does not know ShellYard's certificate yet: this once,
+   go on (Android: *Advanced › Proceed*; iPhone: *Show Details › visit this website*). The page
+   that opens downloads the certificate and says how to install it:
+   - iPhone or iPad: *Settings › Profile Downloaded › Install*, then *Settings › General › About ›
+     Certificate Trust Settings*, and switch on *ShellYard on <your computer>*;
+   - Android: *Settings*, search for *CA certificate*, and install the downloaded file as a CA
+     certificate.
+3. **Step 2 · Open ShellYard:** scan the second QR code. It opens
+   `https://<your computer's IP>:7718` with the key to get in; the phone keeps it, so a bookmark
+   or a home-screen icon works from then on.
+
+While it is on, a phone icon in the header says so, with the number of devices connected; click
+it to open the same dialog. When the computer is on several networks (Wi-Fi and Ethernet, or
+WSL's virtual network), choose the one the phone is on. **New link** makes a new key: every device
+using the old one is disconnected. Untick the box to switch it off; it stays as you left it
+across restarts. The phone keeps trusting the certificate when your computer's address changes:
+ShellYard makes the computer's certificate again by itself.
+
+Things to know:
+
+- Whoever has the link controls your sessions as you do on the computer: keep it to yourself.
+  The connection is encrypted, and once the certificate is installed the phone checks that it is
+  talking to your computer. **If the phone ever warns about ShellYard's certificate after the
+  first setup, do not go on** (see [Security](#security)).
+- The certificate is ShellYard's own: nothing is bought, nothing is sent anywhere. It can only
+  vouch for addresses on private networks, never for a website.
+- The first time, Windows asks whether Node.js may accept connections: allow it on **private**
+  networks. If the phone shows a blank page or cannot connect, that is the first thing to check.
+  Windows asks only once: if the question was refused (even long ago, for another program run
+  by the same `node.exe`), a **Block** rule for `node.exe` stays in *Windows Defender Firewall
+  with Advanced Security* › *Inbound Rules*, and it wins over any rule that allows. Disable it,
+  then allow TCP port 7718 on private networks, for instance from an administrator PowerShell:
+  `New-NetFirewallRule -DisplayName "ShellYard phone access" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 7718 -Profile Private -Program "<path of node.exe>"`.
+- Notifications are not shown on the phone: phone browsers keep them for installed apps. Keep the
+  page open on the phone to follow your sessions.
+- Firefox on Android ignores certificates installed in Android's settings unless told to use
+  them; use Chrome, or Samsung Internet.
+- The port is 7718, or the next free one. Another can be set as `"lan": { "port": 7800 }` in
+  `config.json`.
+
 ### Git worktrees
 
 A session in a git repository shows a chip in its title bar, `⎇ branch · worktree`: the branch
@@ -565,7 +616,7 @@ Everything is in `~/.shellyard/`:
 
 | File | Content |
 |---|---|
-| `config.json` | Your launchers (`profiles`), your stories, the model list, `silenceMs` |
+| `config.json` | Your launchers (`profiles`), your stories, the model list, `silenceMs`, phone access (`lan`) |
 | `server.json` | The running server's port and access token (readable by you only) |
 | `shellyard.log` | The server log |
 | `sessions.json` | The sessions open right now, to bring them back after a restart |
@@ -577,6 +628,8 @@ Everything is in `~/.shellyard/`:
 | `flow.json` | Time blocked on you and answer times, per day, for two weeks |
 | `usage.json` | Usage history: cost and tokens per day, model and story (90 days), and how far each of Claude Code's conversation files has been read |
 | `open.html` | The private page `shellyard` opens in your browser (readable by you only) |
+| `lan.json` | The key of the [Phone access](#phone-access) link, made the first time it is switched on (readable by you only) |
+| `lan-ca.json` | The root certificate of phone access and its key, which phones trust once (readable by you only) |
 | `run/` | Per-session settings files, removed when a session ends |
 | `errors/` | One report per unexpected error, the newest fifty (see [When something goes wrong](#when-something-goes-wrong)) |
 
@@ -586,7 +639,8 @@ Set `SHELLYARD_HOME` to use another folder.
 
 Whoever can reach the server gets a shell as you, so:
 
-- it listens on `127.0.0.1` only, never on the network;
+- it listens on `127.0.0.1` only, never on the network (unless you switch on
+  [Phone access](#phone-access); see below);
 - every API request and WebSocket connection needs a random token created at each start (the
   page's own files and the health check, which hold no secret, are served without it).
   `shellyard` hands it to your browser in
@@ -612,6 +666,41 @@ Whoever can reach the server gets a shell as you, so:
   a command line that other users of the machine could read.
 
 After the server restarts, a tab left open from before is told to run `shellyard` again.
+
+Phone access, while it is on, is a second door, held to rules of its own:
+
+- it is a listener of its own, on another port (7718), that exists only while the switch is on.
+  The `127.0.0.1` listener is never opened to the network;
+- it answers only this computer and private networks (`10.*`, `172.16–31.*`, `192.168.*`,
+  link-local `169.254.*` and `100.64–127.*`, which Tailscale uses), and only when it is addressed
+  by an IP address: a name is refused, so a web page that points a name of its own at your
+  computer (DNS rebinding) gets nothing;
+- it takes its own token, never the per-start one, and the `127.0.0.1` listener does not take
+  its token. Requests that change something, and the WebSocket, must come from the page's own
+  address;
+- it does not serve Claude Code's hooks and status reports, the shutdown, or the health check's
+  proof: those are for the programs of this computer;
+- **New link** replaces its token: every device holding the old one is disconnected at once and
+  refused from then on;
+- it speaks HTTPS only. Its certificate is signed by a root that ShellYard makes for your
+  computer (`lan-ca.json`, readable by you only) and that each phone trusts once. The page, your
+  terminals and the token cross the network encrypted, and a phone that trusts the root refuses
+  anything else that answers on that address (another program holding the port while ShellYard
+  is off, another device taking your computer's address) before sending it the token;
+- the root carries a name constraint: it can vouch only for addresses in the private ranges
+  above and for no DNS name at all. Even with its key, a phone that trusts it accepts nothing it
+  signs for a website. It is made with Node's own crypto (ECDSA P-256), without a dependency.
+
+What it does not protect against:
+
+- the first setup: the phone downloads the root before it can check anything. On a network you
+  trust that is the moment to do it; the fingerprint shown under step 1 on the computer is the
+  one the phone shows in the certificate's details, if you want to compare;
+- going past a certificate warning later. Once a phone trusts the root it has no reason to warn
+  about ShellYard; a warning means something else is answering on that address. Going on hands
+  it the page's storage, link included: do not, and press **New link**;
+- whoever has the link, or a program running as you (it can read `lan.json` and `lan-ca.json`);
+- the link outlives restarts (it is kept in `lan.json`) until you make a new one.
 
 If you edit `config.json` by hand and it is not valid JSON at that moment, ShellYard keeps using the
 last settings that were valid and refuses to save changes from the page until the file is fixed.

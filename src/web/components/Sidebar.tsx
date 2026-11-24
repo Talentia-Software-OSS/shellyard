@@ -72,7 +72,7 @@ function scheduleNote(schedules: Schedule[], now: number): string | null {
 
 /** Where to go, the sessions under their areas, and what to start. */
 export function Sidebar({ onNewSession, drawerOpen = false, onCloseDrawer }: { onNewSession: (storyId?: string) => void; drawerOpen?: boolean; onCloseDrawer?: () => void }): React.JSX.Element {
-  const { sessions, schedules, view, meta } = useStore();
+  const { sessions, schedules, view, meta, lan } = useStore();
   // On a phone the sidebar is a drawer over the page: always unfolded, and its toggle closes it.
   const narrow = useNarrow();
   const counts = selectCounts(sessions);
@@ -206,12 +206,24 @@ export function Sidebar({ onNewSession, drawerOpen = false, onCloseDrawer }: { o
         </div>
       )}
 
-      <div className="local-note">
-        <p className="local-title">
-          <LocalIcon size={14} /> Local only
-        </p>
-        <p className="hint">127.0.0.1 · a new token at every start · ShellYard sends nothing out</p>
-      </div>
+      {lan?.enabled ? (
+        // Not "local only" any more: say what is open, and to whom.
+        <div className="local-note">
+          <p className="local-title">
+            <LocalIcon size={14} /> Local network
+          </p>
+          <p className="hint">
+            Phone access on · HTTPS on port {lan.port} for devices with the link · ShellYard sends nothing out
+          </p>
+        </div>
+      ) : (
+        <div className="local-note">
+          <p className="local-title">
+            <LocalIcon size={14} /> Local only
+          </p>
+          <p className="hint">127.0.0.1 · a new token at every start · ShellYard sends nothing out</p>
+        </div>
+      )}
       <p className="powered-by">Powered by Talentia Software</p>
 
       {storyDialog && <StoryDialog story={storyDialog.story} onClose={() => setStoryDialog(null)} />}

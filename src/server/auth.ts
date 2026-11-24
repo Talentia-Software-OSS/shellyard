@@ -1,5 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import type { IncomingHttpHeaders } from 'node:http';
+import type { IncomingHttpHeaders, IncomingMessage } from 'node:http';
 
 // Whoever reaches this server gets a shell as the user. It only listens on loopback, but a
 // web page open in the user's browser can still send requests to loopback, so every request
@@ -76,6 +76,35 @@ export function classifyHost(hostHeader: string | undefined, port: number, pageH
 export function originAllowed(origin: string | undefined, port: number, pageHost: string): boolean {
   if (!origin) return false;
   return origin.toLowerCase() === pageOrigin(pageHost, port);
+}
+
+/**
+ * What a listener lets in. The loopback listener and the phone (LAN) listener share the request
+ * handler and the WebSocket code; each passes its own gate, so the two never lend each other
+ * their address checks or their token.
+ */
+export interface Gate {
+  /** True for the loopback listener: only it serves the hooks, status reports and shutdown. */
+  local: boolean;
+  /** What the request's Host (and, for the LAN, its sender) is to this listener. */
+  classify(req: IncomingMessage): HostKind;
+  /** The token the page must present on this listener. */
+  token(): string;
+  /** Whether a request from this Origin may change something (and open the WebSocket). */
+  originAllowed(origin: string | undefined, req: IncomingMessage): boolean;
+  /** The WebSocket origin the page's Content-Security-Policy names. */
+  wsOrigin(req: IncomingMessage): string;
+}
+
+/** The gate of the loopback listener: the page of this start, and the shellyard command and hooks on 127.0.0.1. */
+export function localGate(port: number, pageHost: string, token: string): Gate {
+  return {
+    local: true,
+    classify: (req) => classifyHost(req.headers.host, port, pageHost),
+    token: () => token,
+    originAllowed: (origin) => originAllowed(origin, port, pageHost),
+    wsOrigin: () => `ws://${pageHost}:${port}`,
+  };
 }
 
 export function safeEqual(a: string, b: string): boolean {

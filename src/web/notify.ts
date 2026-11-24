@@ -45,7 +45,14 @@ export function handleNotificationClick(
 
 /** Shows a notification that, when clicked, brings ShellYard to the front and runs `onClick`. */
 function show(title: string, options: NotificationOptions, onClick: () => void): void {
-  const n = new Notification(title, options);
+  let n: Notification;
+  try {
+    n = new Notification(title, options);
+  } catch {
+    // Android browsers have the Notification API on a secure page (phone access) but refuse a
+    // page's own notifications: there is nothing to show, and nothing else must break.
+    return;
+  }
   n.onclick = (e) => {
     handleNotificationClick(e, onClick);
     n.close();

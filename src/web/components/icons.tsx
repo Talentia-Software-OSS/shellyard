@@ -106,6 +106,16 @@ export function SidebarIcon(p: IconProps): React.JSX.Element {
   );
 }
 
+/** A phone: phone access is on. */
+export function PhoneIcon(p: IconProps): React.JSX.Element {
+  return (
+    <Svg {...p}>
+      <rect x="6" y="2" width="12" height="20" rx="2" />
+      <path d="M11 18h2" />
+    </Svg>
+  );
+}
+
 /** Three lines: opens the menu on a phone. */
 export function MenuIcon(p: IconProps): React.JSX.Element {
   return (

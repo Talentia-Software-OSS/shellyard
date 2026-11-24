@@ -19,6 +19,23 @@ export interface Config {
   soundFiles: SoundFile[];
   /** The sound chosen for each event. */
   sounds: SoundSettings;
+  /** Phone access: whether the page is also served on the local network, and on which port. */
+  lan: LanConfig;
+}
+
+export interface LanConfig {
+  enabled: boolean;
+  /** The port tried first; the next free one is taken if it is busy. */
+  port: number;
+}
+
+export const DEFAULT_LAN_PORT = 7718;
+
+export function normalizeLan(v: unknown): LanConfig {
+  const o = isRecord(v) ? v : {};
+  const port = typeof o.port === 'number' && Number.isInteger(o.port) && o.port >= 1024 && o.port <= 65535 ? o.port : DEFAULT_LAN_PORT;
+  // Only an explicit true turns it on: anything else leaves the computer reachable from itself alone.
+  return { enabled: o.enabled === true, port };
 }
 
 export interface ServerState {
@@ -66,7 +83,7 @@ export function normalizeSoundSettings(v: unknown, files: SoundFile[]): SoundSet
 }
 
 export function defaultConfig(): Config {
-  return { profiles: [], models: [...DEFAULT_MODELS], silenceMs: DEFAULT_SILENCE_MS, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: noSounds() };
+  return { profiles: [], models: [...DEFAULT_MODELS], silenceMs: DEFAULT_SILENCE_MS, stories: [], restoreSessions: true, profileOrder: [], soundFiles: [], sounds: noSounds(), lan: normalizeLan(undefined) };
 }
 
 /** SHELLYARD_HOME overrides the location, which is how tests avoid the real folder. */
@@ -169,6 +186,7 @@ function normalizeConfig(raw: unknown): Config {
       typeof raw.silenceMs === 'number' && Number.isFinite(raw.silenceMs) && raw.silenceMs >= 1000
         ? raw.silenceMs
         : d.silenceMs,
+    lan: normalizeLan(raw.lan),
   };
 }
 
