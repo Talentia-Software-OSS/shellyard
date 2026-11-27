@@ -115,7 +115,7 @@ export function App(): React.JSX.Element {
         <div className="content" tabIndex={0}>
           {view.kind === 'board' && <BoardView onNewSession={(storyId) => setDialog({ storyId })} />}
           {view.kind === 'attention' && <AnswerQueue storyFilter={view.storyFilter} />}
-          {view.kind === 'grid' && <TerminalsGrid storyFilter={view.storyFilter} />}
+          {view.kind === 'grid' && <TerminalsGrid storyFilter={view.storyFilter} stateFilter={view.stateFilter} />}
           {view.kind === 'usage' && <UsageView />}
           {view.kind === 'conversations' && <ConversationsView />}
           {view.kind === 'schedules' && <SchedulesView />}

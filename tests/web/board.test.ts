@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { areaBranch, areaSummary, boardAreas, byActivity, glyphCounts } from '../../src/web/board.js';
+import { areaBranch, areaSummary, boardAreas, byActivity, glyphCounts, inState, settleStates, stateCounts, STATE_DELAY_MS } from '../../src/web/board.js';
 import type { SessionInfo, Story } from '../../src/shared/types.js';
 import { session } from './session-fixture.js';
 
@@ -132,5 +132,102 @@ describe('areaBranch', () => {
   it('is null when no session knows its branch', () => {
     expect(areaBranch([session('1', 'idle'), onBranch('2', null)])).toBeNull();
     expect(areaBranch([])).toBeNull();
+  });
+});
+
+describe('inState', () => {
+  const sessions = [
+    session('wait', 'attention', 'blocked'),
+    session('guess', 'attention', 'maybe-waiting'),
+    session('done', 'attention', 'finished'),
+    session('busy', 'working'),
+    session('printing', 'running', null, 0, 'shell'),
+    session('quiet', 'running', null, 0, 'shell'),
+    session('rest', 'idle'),
+    session('gone', 'exited'),
+  ];
+  const rates = { printing: 120 };
+  const { states } = settleStates({}, sessions, rates, 0);
+  const ids = (g: Parameters<typeof inState>[2]): string[] => inState(sessions, states, g).map((s) => s.id);
+
+  it('keeps only the sessions a chip counts, a guess that one waits among those that need you', () => {
+    expect(ids('needs')).toEqual(['wait', 'guess']);
+    expect(ids('finished')).toEqual(['done']);
+    expect(ids('working')).toEqual(['busy', 'printing']);
+    expect(ids('idle')).toEqual(['quiet', 'rest']);
+  });
+
+  it('agrees with the counts on the chips', () => {
+    const counts = stateCounts(sessions, states);
+    for (const g of ['needs', 'finished', 'working', 'idle'] as const) expect(inState(sessions, states, g)).toHaveLength(counts[g]);
+    expect(counts).toEqual(glyphCounts(sessions, rates));
+  });
+
+  it('keeps every session when there is no state to filter on', () => {
+    expect(inState(sessions, states, undefined)).toEqual(sessions);
+  });
+});
+
+describe('settleStates', () => {
+  const D = STATE_DELAY_MS;
+  const shell = session('sh', 'running', null, 0, 'shell');
+  const shownOf = (r: ReturnType<typeof settleStates>): string | undefined => r.states.sh?.shown;
+
+  it('takes the state of a session it has not seen yet at once', () => {
+    const r = settleStates({}, [shell], { sh: 50 }, 1000);
+    expect(shownOf(r)).toBe('working');
+    expect(r.wakeAt).toBeNull();
+  });
+
+  it('keeps the state shown until a new one has lasted the delay', () => {
+    const a = settleStates({}, [shell], {}, 0);
+    const b = settleStates(a.states, [shell], { sh: 50 }, 1000);
+    expect(shownOf(b)).toBe('idle');
+    expect(b.wakeAt).toBe(1000 + D);
+    const c = settleStates(b.states, [shell], { sh: 50 }, 1000 + D - 1);
+    expect(shownOf(c)).toBe('idle');
+    const d = settleStates(c.states, [shell], { sh: 50 }, 1000 + D);
+    expect(shownOf(d)).toBe('working');
+    expect(d.wakeAt).toBeNull();
+  });
+
+  it('ignores a burst that ends before the delay', () => {
+    const a = settleStates({}, [shell], {}, 0);
+    const b = settleStates(a.states, [shell], { sh: 50 }, 1000);
+    const c = settleStates(b.states, [shell], {}, 2000);
+    expect(shownOf(c)).toBe('idle');
+    expect(c.wakeAt).toBeNull();
+    const d = settleStates(c.states, [shell], {}, 1000 + D);
+    expect(shownOf(d)).toBe('idle');
+  });
+
+  it('restarts the wait when the state it waits on changes again', () => {
+    const claude = (status: 'working' | 'idle' | 'attention', reason: 'finished' | null = null): SessionInfo[] => [session('sh', status, reason)];
+    const a = settleStates({}, claude('working'), {}, 0);
+    const b = settleStates(a.states, claude('attention', 'finished'), {}, 1000);
+    const c = settleStates(b.states, claude('idle'), {}, 2000);
+    expect(c.wakeAt).toBe(2000 + D);
+    expect(shownOf(settleStates(c.states, claude('idle'), {}, 1000 + D))).toBe('working');
+    expect(shownOf(settleStates(c.states, claude('idle'), {}, 2000 + D))).toBe('idle');
+  });
+
+  it('shows at once a session that needs the user, or that has ended', () => {
+    const a = settleStates({}, [session('sh', 'working')], {}, 0);
+    expect(shownOf(settleStates(a.states, [session('sh', 'attention', 'blocked')], {}, 10))).toBe('needs');
+    expect(shownOf(settleStates(a.states, [session('sh', 'attention', 'maybe-waiting')], {}, 10))).toBe('needs');
+    expect(shownOf(settleStates(a.states, [session('sh', 'exited')], {}, 10))).toBe('exited');
+  });
+
+  it('forgets the sessions that are gone', () => {
+    const a = settleStates({}, [shell], {}, 0);
+    expect(settleStates(a.states, [], {}, 10).states).toEqual({});
+  });
+
+  it('wakes at the earliest of the waits', () => {
+    const two = [session('x', 'working'), session('y', 'working')];
+    const a = settleStates({}, two, {}, 0);
+    const b = settleStates(a.states, [session('x', 'idle'), session('y', 'working')], {}, 3000);
+    const c = settleStates(b.states, [session('x', 'idle'), session('y', 'idle')], {}, 1000 + 3000);
+    expect(c.wakeAt).toBe(3000 + D);
   });
 });

@@ -2,6 +2,7 @@ import type { SessionInfo } from '../../shared/types.js';
 import { api } from '../api.js';
 import { reasonLabel } from '../attention.js';
 import { inStory } from '../selectors.js';
+import { inState, type ChipState } from '../board.js';
 import { setView, useStore } from '../store.js';
 import { Tachometer } from './Cluster.js';
 import { ColorDot, Elapsed, SessionActions, StatusBadge, StoryFilter, StorySelect } from './SessionBits.js';
@@ -104,18 +105,33 @@ export function TileHeader({ session, children, inOwnWindow }: { session: Sessio
   );
 }
 
-/** Every session side by side, or only those of one story. */
-export function TerminalsGrid({ storyFilter }: { storyFilter?: string | null }): React.JSX.Element {
-  const { sessions, stories, loaded } = useStore();
-  const shown = inStory(sessions, storyFilter, stories);
+const STATE_NAMES: Record<ChipState, string> = { needs: 'waiting for you', finished: 'finished', working: 'working', idle: 'idle' };
+
+/** Every session side by side, or only those of one story, or only those in one state. */
+export function TerminalsGrid({ storyFilter, stateFilter }: { storyFilter?: string | null; stateFilter?: ChipState }): React.JSX.Element {
+  const { sessions, stories, loaded, steady } = useStore();
+  const ofStory = inStory(sessions, storyFilter, stories);
+  const shown = inState(ofStory, steady, stateFilter);
   return (
     <div className="grid-view">
       <div className="view-tools">
-        <StoryFilter value={storyFilter} onChange={(v) => setView({ kind: 'grid', storyFilter: v })} />
+        <StoryFilter value={storyFilter} onChange={(v) => setView({ kind: 'grid', storyFilter: v, stateFilter })} />
+        {stateFilter !== undefined && (
+          <span className="state-filter">
+            Only the terminals {STATE_NAMES[stateFilter]}
+            <button type="button" onClick={() => setView({ kind: 'grid', storyFilter })}>
+              Show all
+            </button>
+          </span>
+        )}
       </div>
       {loaded && shown.length === 0 ? (
         <p className="empty">
-          {sessions.length === 0 ? 'No sessions are open. Start one from the sidebar.' : 'This area has no sessions. Start one with the + beside its name.'}
+          {sessions.length === 0
+            ? 'No sessions are open. Start one from the sidebar.'
+            : ofStory.length === 0
+              ? 'This area has no sessions. Start one with the + beside its name.'
+              : `No terminal is ${STATE_NAMES[stateFilter!]} right now.`}
         </p>
       ) : (
         <div className="grid">

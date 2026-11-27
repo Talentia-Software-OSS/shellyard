@@ -428,6 +428,21 @@ code {
   margin-bottom: 10px;
 }
 
+.grid-view .view-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.state-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+
 .heading-filter {
   color: var(--muted);
   font-weight: 400;
@@ -2341,6 +2356,13 @@ button.new-story {
 
 .chip-finished.chip-lit {
   border-color: var(--glyph-finished);
+}
+
+/* The chip of the state the terminals are narrowed to. */
+.chip-pressed {
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px currentColor;
 }
 
 /* Answer queue: the waiting sessions on the left, the one selected on the right */
