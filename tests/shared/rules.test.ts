@@ -3,7 +3,7 @@ import { commandTokens, patternError, ruleMatches, suggestPattern } from '../../
 
 describe('commandTokens', () => {
   it('splits a plain command into words, keeping quoted parts whole', () => {
-    expect(commandTokens('dotnet test src/Hcm.Payroll.Tests --filter Slot')).toEqual(['dotnet', 'test', 'src/Hcm.Payroll.Tests', '--filter', 'Slot']);
+    expect(commandTokens('dotnet test src/Demo.Payroll.Tests --filter Slot')).toEqual(['dotnet', 'test', 'src/Demo.Payroll.Tests', '--filter', 'Slot']);
     expect(commandTokens('  git   commit -m "fix slot rules"  ')).toEqual(['git', 'commit', '-m', '"fix slot rules"']);
     expect(commandTokens("echo 'a b'")).toEqual(['echo', "'a b'"]);
   });
@@ -50,7 +50,7 @@ describe('commandTokens', () => {
 describe('ruleMatches', () => {
   it('matches a command that starts with the words of a pattern ending in *', () => {
     expect(ruleMatches('dotnet test *', 'dotnet test')).toBe(true);
-    expect(ruleMatches('dotnet test *', 'dotnet test src/Hcm.Payroll.Tests --filter Slot')).toBe(true);
+    expect(ruleMatches('dotnet test *', 'dotnet test src/Demo.Payroll.Tests --filter Slot')).toBe(true);
     expect(ruleMatches('dotnet test *', 'dotnet build')).toBe(false);
     expect(ruleMatches('dotnet test *', 'dotnet')).toBe(false);
   });
@@ -94,7 +94,7 @@ describe('patternError', () => {
 
 describe('suggestPattern', () => {
   it('keeps the program and its subcommand, and allows any arguments after them', () => {
-    expect(suggestPattern('dotnet test src/Hcm.Payroll.Tests --filter Slot')).toBe('dotnet test *');
+    expect(suggestPattern('dotnet test src/Demo.Payroll.Tests --filter Slot')).toBe('dotnet test *');
     expect(suggestPattern('git push origin main')).toBe('git push *');
     expect(suggestPattern('npm run build')).toBe('npm run *');
   });

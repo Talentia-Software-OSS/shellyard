@@ -4,7 +4,7 @@ import { answerable, areaRuleFor, askLine, requestKind, requestSummary } from '.
 import { session } from './session-fixture.js';
 
 const pending = (over: Partial<PendingRequest> = {}): PendingRequest => ({ id: 'r1', kind: 'permission', tool: 'Bash', detail: 'dotnet test', message: null, since: 0, ...over });
-const blocked = (p: PendingRequest | null): SessionInfo => ({ ...session('s', 'attention', 'blocked'), cwd: 'C:/repos/hcm', pending: p });
+const blocked = (p: PendingRequest | null): SessionInfo => ({ ...session('s', 'attention', 'blocked'), cwd: 'C:/repos/project', pending: p });
 
 describe('requestKind', () => {
   it('tells permissions, questions, guesses and finished turns apart', () => {
@@ -28,9 +28,9 @@ describe('answerable', () => {
 
 describe('askLine', () => {
   it('names a command, another tool, or neither, and the folder', () => {
-    expect(askLine(blocked(pending()))).toBe('Allow this command in C:/repos/hcm?');
-    expect(askLine(blocked(pending({ tool: 'Edit' })))).toBe('Allow Edit here in C:/repos/hcm?');
-    expect(askLine({ ...blocked(pending({ tool: null })), liveCwd: 'C:/repos/hcm/src' })).toBe('Allow this in C:/repos/hcm/src?');
+    expect(askLine(blocked(pending()))).toBe('Allow this command in C:/repos/project?');
+    expect(askLine(blocked(pending({ tool: 'Edit' })))).toBe('Allow Edit here in C:/repos/project?');
+    expect(askLine({ ...blocked(pending({ tool: null })), liveCwd: 'C:/repos/project/src' })).toBe('Allow this in C:/repos/project/src?');
   });
 });
 

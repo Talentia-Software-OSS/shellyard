@@ -7,7 +7,7 @@ import { session } from '../web/session-fixture.js';
 const recipe: Recipe = {
   id: 'r1',
   name: 'Bug fix',
-  repo: '/r/hcm',
+  repo: '/r/project',
   base: 'main',
   branch: 'feat/{ticket-lower}',
   folder: '{repo}-{ticket-lower}',
@@ -61,41 +61,41 @@ function fakes(over: { branches?: string[]; worktreeFails?: boolean; storyFails?
 describe('startFromTicket', () => {
   it('makes the worktree on a new branch, the area in it, and the sessions with their prompt', async () => {
     const f = fakes();
-    const out = await startFromTicket(f.deps, 'r1', 'hcm-7912');
-    expect(f.calls).toEqual(['worktree /r/hcm /r/hcm-hcm-7912 feat/hcm-7912 new=true base=main', 'story HCM-7912 HCM-7912 /r/hcm-hcm-7912']);
+    const out = await startFromTicket(f.deps, 'r1', 'proj-7912');
+    expect(f.calls).toEqual(['worktree /r/project /r/project-proj-7912 feat/proj-7912 new=true base=main', 'story PROJ-7912 PROJ-7912 /r/project-proj-7912']);
     expect(f.created).toEqual([
-      { profileId: 'claude', storyId: 'story-1', cwd: '/r/hcm-hcm-7912', model: 'claude-opus-5-5' },
-      { profileId: 'pwsh', storyId: 'story-1', cwd: '/r/hcm-hcm-7912' },
+      { profileId: 'claude', storyId: 'story-1', cwd: '/r/project-proj-7912', model: 'claude-opus-5-5' },
+      { profileId: 'pwsh', storyId: 'story-1', cwd: '/r/project-proj-7912' },
     ]);
-    expect(f.delivered).toEqual([['s1', 'Read HCM-7912, propose a plan.']]);
+    expect(f.delivered).toEqual([['s1', 'Read PROJ-7912, propose a plan.']]);
     expect(out).toMatchObject({ newBranch: true, story: { id: 'story-1' } });
     expect(out.sessions).toHaveLength(2);
   });
 
   it('checks out a branch that already exists instead of making it again', async () => {
-    const f = fakes({ branches: ['main', 'feat/hcm-7912'] });
-    await startFromTicket(f.deps, 'r1', 'HCM-7912');
-    expect(f.calls[0]).toBe('worktree /r/hcm /r/hcm-hcm-7912 feat/hcm-7912 new=false base=-');
+    const f = fakes({ branches: ['main', 'feat/proj-7912'] });
+    await startFromTicket(f.deps, 'r1', 'PROJ-7912');
+    expect(f.calls[0]).toBe('worktree /r/project /r/project-proj-7912 feat/proj-7912 new=false base=-');
   });
 
   it('refuses a bad ticket, an unknown recipe, and a ticket that already has an area, touching nothing', async () => {
-    const f = fakes({ stories: [{ id: 'x', name: 'Payroll slots', ticket: 'hcm-7912', cwd: '', color: '', sound: '' }] });
+    const f = fakes({ stories: [{ id: 'x', name: 'Payroll slots', ticket: 'proj-7912', cwd: '', color: '', sound: '' }] });
     await expect(startFromTicket(f.deps, 'r1', 'nope')).rejects.toMatchObject({ status: 400 });
-    await expect(startFromTicket(f.deps, 'other', 'HCM-1')).rejects.toMatchObject({ status: 404 });
-    await expect(startFromTicket(f.deps, 'r1', 'HCM-7912')).rejects.toMatchObject({ status: 409, message: expect.stringContaining('Payroll slots') });
+    await expect(startFromTicket(f.deps, 'other', 'PROJ-1')).rejects.toMatchObject({ status: 404 });
+    await expect(startFromTicket(f.deps, 'r1', 'PROJ-7912')).rejects.toMatchObject({ status: 409, message: expect.stringContaining('Payroll slots') });
     expect(f.calls).toEqual([]);
   });
 
   it('refuses a recipe whose launcher is gone, before making anything', async () => {
     const f = fakes();
     f.deps.profiles = () => [profile('claude', 'claude')];
-    await expect(startFromTicket(f.deps, 'r1', 'HCM-1')).rejects.toThrow(/pwsh/);
+    await expect(startFromTicket(f.deps, 'r1', 'PROJ-1')).rejects.toThrow(/pwsh/);
     expect(f.calls).toEqual([]);
   });
 
   it('says what git said when the worktree cannot be made, and makes no area', async () => {
     const f = fakes({ worktreeFails: true });
-    const e = await startFromTicket(f.deps, 'r1', 'HCM-1').catch((x: unknown) => x);
+    const e = await startFromTicket(f.deps, 'r1', 'PROJ-1').catch((x: unknown) => x);
     expect(e).toBeInstanceOf(TicketError);
     expect(e).toMatchObject({ status: 409, message: 'fatal: already exists' });
     expect(f.calls.some((c) => c.startsWith('story'))).toBe(false);
@@ -103,8 +103,8 @@ describe('startFromTicket', () => {
 
   it('takes the worktree and its new branch away again when the area cannot be made', async () => {
     const f = fakes({ storyFails: true });
-    await expect(startFromTicket(f.deps, 'r1', 'HCM-1')).rejects.toMatchObject({ status: 409 });
-    expect(f.calls.at(-1)).toBe('remove /r/hcm /r/hcm-hcm-1 deleteBranch=true');
+    await expect(startFromTicket(f.deps, 'r1', 'PROJ-1')).rejects.toMatchObject({ status: 409 });
+    expect(f.calls.at(-1)).toBe('remove /r/project /r/project-proj-1 deleteBranch=true');
     expect(f.created).toEqual([]);
   });
 });

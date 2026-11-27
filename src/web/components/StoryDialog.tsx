@@ -56,7 +56,7 @@ export function StoryDialog({ story, onClose }: { story?: Story; onClose: () => 
 
         <label>
           <span>Ticket</span>
-          <input value={ticket} onChange={(e) => setTicket(e.target.value)} placeholder="Optional, e.g. HCM-1234" spellCheck={false} />
+          <input value={ticket} onChange={(e) => setTicket(e.target.value)} placeholder="Optional, e.g. PROJ-123" spellCheck={false} />
         </label>
 
         <div className="field">

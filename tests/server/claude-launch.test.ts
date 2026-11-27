@@ -119,13 +119,13 @@ describe('parseHookBody', () => {
 
 describe('parseHookRequest', () => {
   it('reads the command of a Bash permission request', () => {
-    expect(parseHookRequest({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'dotnet test src/Hcm.Payroll.Tests', description: 'Run tests' } }))
-      .toEqual({ kind: 'permission', tool: 'Bash', detail: 'dotnet test src/Hcm.Payroll.Tests', message: null });
+    expect(parseHookRequest({ hook_event_name: 'PermissionRequest', tool_name: 'Bash', tool_input: { command: 'dotnet test src/Demo.Payroll.Tests', description: 'Run tests' } }))
+      .toEqual({ kind: 'permission', tool: 'Bash', detail: 'dotnet test src/Demo.Payroll.Tests', message: null });
   });
 
   it('names the file, address or pattern other tools would act on', () => {
     const detail = (tool_name: string, tool_input: unknown) => parseHookRequest({ hook_event_name: 'PermissionRequest', tool_name, tool_input })?.detail;
-    expect(detail('Edit', { file_path: String.raw`C:\repos\hcm\a.cs`, old_string: 'x' })).toBe(String.raw`C:\repos\hcm\a.cs`);
+    expect(detail('Edit', { file_path: String.raw`C:\repos\project\a.cs`, old_string: 'x' })).toBe(String.raw`C:\repos\project\a.cs`);
     expect(detail('Write', { file_path: '/tmp/b.txt', content: 'y' })).toBe('/tmp/b.txt');
     expect(detail('WebFetch', { url: 'https://example.com', prompt: 'p' })).toBe('https://example.com');
     expect(detail('WebSearch', { query: 'vitest' })).toBe('vitest');

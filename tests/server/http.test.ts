@@ -427,7 +427,7 @@ describe('http api', () => {
 
     it('"always in this area" adds the rule made from the command, and allows it once', async () => {
       const { story, s } = await inArea();
-      await ask(s.id, permission('dotnet test src/Hcm.Payroll.Tests --filter Slot'));
+      await ask(s.id, permission('dotnet test src/Demo.Payroll.Tests --filter Slot'));
       const r = await answer(s.id, mgr.get(s.id)!.pending!.id, 'area');
       expect(r.status).toBe(200);
       expect(ptys.last().written).toEqual(['\r']);
@@ -943,19 +943,19 @@ describe.skipIf(!hasGit)('http api: git', () => {
   it('starts from a ticket: a worktree on its branch, an area in it, the recipe sessions with their prompt', async () => {
     const recipe = (await post('/api/recipes', { name: 'Bug fix', repo, base: 'main', branch: 'feat/{ticket-lower}', folder: '{repo}-{ticket-lower}', sessions: [{ profileId: 'builtin-node', prompt: '' }] })).json();
     expect(recipe.id).toBeTruthy();
-    const r = await post('/api/tickets', { recipeId: recipe.id, ticket: 'hcm-7912' });
+    const r = await post('/api/tickets', { recipeId: recipe.id, ticket: 'proj-7912' });
     expect(r.status).toBe(201);
     const out = r.json();
-    const worktree = `${repo}-hcm-7912`;
-    expect(out.story).toMatchObject({ name: 'HCM-7912', ticket: 'HCM-7912', cwd: worktree });
+    const worktree = `${repo}-proj-7912`;
+    expect(out.story).toMatchObject({ name: 'PROJ-7912', ticket: 'PROJ-7912', cwd: worktree });
     expect(out.sessions).toEqual([expect.objectContaining({ storyId: out.story.id, cwd: worktree })]);
-    expect(git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feat/hcm-7912');
-    expect((await post('/api/tickets', { recipeId: recipe.id, ticket: 'HCM-7912' })).status).toBe(409);
+    expect(git(worktree, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('feat/proj-7912');
+    expect((await post('/api/tickets', { recipeId: recipe.id, ticket: 'PROJ-7912' })).status).toBe(409);
   });
 
   it('says what git says when the worktree cannot be made, and makes no area', async () => {
     const recipe = (await post('/api/recipes', { name: 'Odd', repo, base: 'no-such-base', branch: 'feat/{ticket-lower}', folder: '{repo}-{ticket-lower}', sessions: [{ profileId: 'builtin-node', prompt: '' }] })).json();
-    const r = await post('/api/tickets', { recipeId: recipe.id, ticket: 'HCM-1' });
+    const r = await post('/api/tickets', { recipeId: recipe.id, ticket: 'PROJ-1' });
     expect(r.status).toBe(409);
     expect((await call('GET', '/api/recipes')).json()).toHaveLength(1);
     expect(loadConfig().config.stories).toEqual([]);
