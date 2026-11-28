@@ -6,7 +6,7 @@ import { useTempHome } from '../helpers.js';
 
 const good = {
   name: 'Bug fix',
-  repo: '/r/hcm',
+  repo: '/r/project',
   base: 'main',
   branch: 'feat/{ticket-lower}',
   folder: '{repo}-{ticket-lower}',

@@ -35,13 +35,13 @@ export interface TicketPlan {
   sessions: RecipeSession[];
 }
 
-/** "hcm-7912" as "HCM-7912"; null for anything but a project key, a dash and a number. */
+/** "proj-123" as "PROJ-123"; null unless it is a project key followed by a dash and number. */
 export function normalizeTicket(raw: string): string | null {
   const t = raw.trim().toUpperCase();
   return /^[A-Z][A-Z0-9]*-\d+$/.test(t) ? t : null;
 }
 
-/** Fills {ticket} (HCM-7912), {ticket-lower} (hcm-7912) and {repo} (the repository folder). */
+/** Fills {ticket} (PROJ-123), {ticket-lower} (proj-123) and {repo} (the repository folder). */
 export function fillTemplate(template: string, ticket: string, repo: string): string {
   return template.replaceAll('{ticket-lower}', ticket.toLowerCase()).replaceAll('{ticket}', ticket).replaceAll('{repo}', repo);
 }
@@ -83,7 +83,7 @@ export function recipeError(r: Omit<Recipe, 'id'>): string | null {
 /** What a ticket and a recipe come to; an error when either cannot be used. */
 export function planTicket(r: Omit<Recipe, 'id'>, rawTicket: string): TicketPlan | { error: string } {
   const ticket = normalizeTicket(rawTicket);
-  if (!ticket) return { error: 'Write a ticket code such as HCM-7912.' };
+  if (!ticket) return { error: 'Write a ticket code such as PROJ-123.' };
   const problem = recipeError(r);
   if (problem) return { error: problem };
   const repo = cleanRepo(r.repo);

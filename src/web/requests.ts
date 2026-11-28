@@ -37,7 +37,7 @@ export function areaRuleFor(s: SessionInfo, areaIds: ReadonlySet<string>): strin
   return suggestPattern(p.detail);
 }
 
-/** "Allow this command in C:\repos\hcm?": what the terminal asks, in a line. */
+/** "Allow this command in C:\repos\project?": what the terminal asks, in a line. */
 export function askLine(s: SessionInfo): string {
   const tool = s.pending?.tool;
   const what = tool === 'Bash' ? 'this command' : tool ? `${tool} here` : 'this';

@@ -5,9 +5,9 @@ const item = (id: string, title: string, keywords = '') => ({ id, title, keyword
 
 describe('scoreMatch', () => {
   it('finds every word of the query, in any order', () => {
-    expect(scoreMatch('Slot HCM-7911 e HCM-7912', 'hcm 79')).not.toBeNull();
-    expect(scoreMatch('Slot HCM-7911 e HCM-7912', '7912 slot')).not.toBeNull();
-    expect(scoreMatch('Slot HCM-7911', 'release')).toBeNull();
+    expect(scoreMatch('Slot PROJ-7911 e PROJ-7912', 'proj 79')).not.toBeNull();
+    expect(scoreMatch('Slot PROJ-7911 e PROJ-7912', '7912 slot')).not.toBeNull();
+    expect(scoreMatch('Slot PROJ-7911', 'release')).toBeNull();
   });
 
   it('accepts the letters of a word in order, with gaps', () => {
@@ -29,14 +29,14 @@ describe('scoreMatch', () => {
 });
 
 describe('rankItems', () => {
-  const items = [item('a', 'New session'), item('b', 'Slot HCM-7911 e HCM-7912', 'waiting'), item('c', 'Open ~/repos/hcm in VS Code'), item('d', 'Usage')];
+  const items = [item('a', 'New session'), item('b', 'Slot PROJ-7911 e PROJ-7912', 'waiting'), item('c', 'Open ~/repos/project in VS Code'), item('d', 'Usage')];
 
   it('keeps the given order for an empty query', () => {
     expect(rankItems(items, '').map((i) => i.id)).toEqual(['a', 'b', 'c', 'd']);
   });
 
   it('keeps only what matches, the best first, searching the keywords too', () => {
-    expect(rankItems(items, 'hcm').map((i) => i.id)).toEqual(['b', 'c']);
+    expect(rankItems(items, 'proj').map((i) => i.id)).toEqual(['b', 'c']);
     expect(rankItems(items, 'waiting').map((i) => i.id)).toEqual(['b']);
   });
 

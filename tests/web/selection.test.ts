@@ -32,9 +32,9 @@ describe('isSelectGesture', () => {
 
 describe('sendReport', () => {
   const names = new Map([
-    ['a', 'Worktree HCM'],
+    ['a', 'Worktree PROJ'],
     ['b', 'Release notes'],
-    ['c', 'HCM-8139 hotfix'],
+    ['c', 'PROJ-8139 hotfix'],
   ]);
   it('says how many took the prompt', () => {
     expect(sendReport([{ id: 'a', outcome: 'sent' }, { id: 'b', outcome: 'sent' }], names)).toBe('Sent to 2 sessions.');
@@ -51,6 +51,6 @@ describe('sendReport', () => {
         ],
         names,
       ),
-    ).toBe('Sent to 1 of 4. Not sent: Release notes (busy: it is working or waiting on a question), HCM-8139 hotfix (not a Claude Code session), a closed session.');
+    ).toBe('Sent to 1 of 4. Not sent: Release notes (busy: it is working or waiting on a question), PROJ-8139 hotfix (not a Claude Code session), a closed session.');
   });
 });

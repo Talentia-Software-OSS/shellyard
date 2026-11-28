@@ -68,7 +68,7 @@ function RecipeForm({ draft, onSaved, onCancel }: { draft: Draft; onSaved: (r: R
         <input value={r.folder} onChange={(e) => set({ folder: e.target.value })} spellCheck={false} />
       </label>
       <p className="hint">
-        <code>{'{ticket}'}</code> is the code as HCM-7912, <code>{'{ticket-lower}'}</code> as hcm-7912, <code>{'{repo}'}</code> the repository folder.
+        <code>{'{ticket}'}</code> is the code as PROJ-123, <code>{'{ticket-lower}'}</code> as proj-123, <code>{'{repo}'}</code> the repository folder.
       </p>
 
       <fieldset className="recipe-sessions">
@@ -214,7 +214,7 @@ export function TicketDialog({ onClose }: { onClose: () => void }): React.JSX.El
             <div className="recipe-row">
               <label>
                 <span>Ticket</span>
-                <input className="ticket-code" value={ticket} onChange={(e) => setTicket(e.target.value)} placeholder="HCM-7912" spellCheck={false} autoFocus />
+                <input className="ticket-code" value={ticket} onChange={(e) => setTicket(e.target.value)} placeholder="PROJ-123" spellCheck={false} autoFocus />
               </label>
               <label>
                 <span>Recipe</span>

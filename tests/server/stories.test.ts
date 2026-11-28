@@ -37,8 +37,8 @@ describe('StoryStore', () => {
 
   it('creates a story with an id and trimmed fields, and keeps it on disk', () => {
     const store = new StoryStore();
-    const s = store.create({ name: '  Payroll export ', ticket: ' HCM-1234 ', cwd: home.dir(), color: '#ff0000' });
-    expect(s).toEqual({ id: s.id, name: 'Payroll export', ticket: 'HCM-1234', cwd: home.dir(), color: '#ff0000', sound: '' });
+    const s = store.create({ name: '  Payroll export ', ticket: ' PROJ-1234 ', cwd: home.dir(), color: '#ff0000' });
+    expect(s).toEqual({ id: s.id, name: 'Payroll export', ticket: 'PROJ-1234', cwd: home.dir(), color: '#ff0000', sound: '' });
     expect(s.id).toMatch(/^story-/);
     expect(new StoryStore().list()).toEqual([s]);
   });
@@ -261,12 +261,12 @@ describe('stories over http and websocket', () => {
   });
 
   it('creates, lists, edits and deletes', async () => {
-    const created = await call('POST', '/api/stories', { name: 'Payroll export', ticket: 'HCM-1234' });
+    const created = await call('POST', '/api/stories', { name: 'Payroll export', ticket: 'PROJ-1234' });
     expect(created.status).toBe(201);
-    expect(created.json).toMatchObject({ name: 'Payroll export', ticket: 'HCM-1234' });
+    expect(created.json).toMatchObject({ name: 'Payroll export', ticket: 'PROJ-1234' });
     expect((await call('GET', '/api/stories')).json).toEqual([created.json]);
     const patched = await call('PATCH', `/api/stories/${created.json.id}`, { name: 'Payroll' });
-    expect(patched.json).toMatchObject({ name: 'Payroll', ticket: 'HCM-1234' });
+    expect(patched.json).toMatchObject({ name: 'Payroll', ticket: 'PROJ-1234' });
     expect((await call('DELETE', `/api/stories/${created.json.id}`)).status).toBe(204);
     expect((await call('GET', '/api/stories')).json).toEqual([]);
   });
