@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
-import { glyphCounts } from '../board.js';
+import { stateCounts, type ChipState } from '../board.js';
 import { limitDisplay, revLevel, zoneOf } from '../gauges.js';
-import type { Glyph } from '../status-glyph.js';
-import { setView, useStore, type View } from '../store.js';
+import { setView, useStore } from '../store.js';
 import { Dial } from './Dial.js';
 import { GlyphMark } from './StatusGlyph.js';
 
@@ -62,25 +61,37 @@ function Limits(): React.JSX.Element {
   );
 }
 
-const CHIPS: Array<{ glyph: Exclude<Glyph, 'maybe' | 'exited'>; one: string; many: string; view: View; always: boolean }> = [
-  { glyph: 'needs', one: 'needs you', many: 'need you', view: { kind: 'attention' }, always: true },
-  { glyph: 'finished', one: 'finished', many: 'finished', view: { kind: 'attention' }, always: false },
-  { glyph: 'working', one: 'working', many: 'working', view: { kind: 'grid' }, always: true },
-  { glyph: 'idle', one: 'idle', many: 'idle', view: { kind: 'grid' }, always: true },
+const CHIPS: Array<{ glyph: ChipState; one: string; many: string; always: boolean }> = [
+  { glyph: 'needs', one: 'needs you', many: 'need you', always: true },
+  { glyph: 'finished', one: 'finished', many: 'finished', always: false },
+  { glyph: 'working', one: 'working', many: 'working', always: true },
+  { glyph: 'idle', one: 'idle', many: 'idle', always: true },
 ];
 
-/** How many sessions are in each state, as chips that lead to them. "Finished" only when there are some. */
+/**
+ * How many sessions are in each state, as chips that show only those terminals. The chip of the
+ * state shown is pressed, and pressing it again shows them all. "Finished" only when there are some.
+ */
 function StatusChips(): React.JSX.Element {
-  const { sessions, activity } = useStore();
-  const counts = glyphCounts(sessions, activity);
+  const { sessions, steady, view } = useStore();
+  const counts = stateCounts(sessions, steady);
+  const current = view.kind === 'grid' ? view.stateFilter : undefined;
   return (
     <ul className="chips" aria-label="Sessions by state">
-      {CHIPS.filter((c) => c.always || counts[c.glyph] > 0).map((c) => {
+      {CHIPS.filter((c) => c.always || counts[c.glyph] > 0 || current === c.glyph).map((c) => {
         const n = counts[c.glyph];
         const label = `${n} ${n === 1 ? c.one : c.many}`;
+        const pressed = current === c.glyph;
+        const storyFilter = view.kind === 'grid' ? view.storyFilter : undefined;
         return (
           <li key={c.glyph}>
-            <button type="button" className={`chip chip-${c.glyph}${n > 0 ? ' chip-lit' : ''}`} onClick={() => setView(c.view)}>
+            <button
+              type="button"
+              className={`chip chip-${c.glyph}${n > 0 ? ' chip-lit' : ''}${pressed ? ' chip-pressed' : ''}`}
+              aria-pressed={pressed}
+              title={pressed ? 'Show all terminals' : `Show only the terminals that are ${c.glyph === 'needs' ? 'waiting for you' : c.many}`}
+              onClick={() => setView({ kind: 'grid', storyFilter, stateFilter: pressed ? undefined : c.glyph })}
+            >
               <GlyphMark glyph={c.glyph} size={12} />
               {label}
             </button>

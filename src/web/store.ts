@@ -8,12 +8,13 @@ import { pruneSelection, toggleSelected } from './selection.js';
 import { addToDigest, loadFocus, saveFocus, startFocus, type Focus } from './focus.js';
 import { loadThemeChoice, resolveTheme, saveThemeChoice, systemPrefersLight, watchSystemTheme, type Theme, type ThemeChoice } from './theme.js';
 import { loadToken, rememberToken, wsProtocols } from './token.js';
+import { settleStates, type ChipState, type Steady } from './board.js';
 
 /** `storyFilter`: a story id, null for the ungrouped sessions, undefined for everything. */
 export type View =
   | { kind: 'board' }
   | { kind: 'attention'; storyFilter?: string | null }
-  | { kind: 'grid'; storyFilter?: string | null }
+  | { kind: 'grid'; storyFilter?: string | null; stateFilter?: ChipState }
   | { kind: 'usage' }
   | { kind: 'conversations' }
   | { kind: 'schedules' }
@@ -31,6 +32,8 @@ interface State {
   usage: UsageSummary | null;
   /** Bytes printed in the last second per session; absent means quiet. */
   activity: Record<string, number>;
+  /** The state the chips show of each session, which follows a change once it has lasted. */
+  steady: Record<string, Steady>;
   /** The unexpected errors of this run of the server, newest first. */
   errors: ErrorReport[];
   /** The uncommitted changes of the worktrees sessions work in, by worktree path. */
@@ -67,6 +70,7 @@ let state: State = {
   schedules: [],
   usage: null,
   activity: {},
+  steady: {},
   errors: [],
   changes: {},
   sparks: emptyHistory(),
@@ -95,6 +99,17 @@ let unconfirmedToken: string | null = null;
 function set(patch: Partial<State>): void {
   state = { ...state, ...patch };
   for (const l of [...listeners]) l();
+}
+
+let settleTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** The states shown for these sessions now, with a look again when a change waits its turn. */
+function settle(sessions: SessionInfo[], activity: Record<string, number>): Record<string, Steady> {
+  const { states, wakeAt } = settleStates(state.steady, sessions, activity, Date.now());
+  clearTimeout(settleTimer);
+  // The server stops sending activity once all is quiet, so nothing else would come to look.
+  if (wakeAt !== null) settleTimer = setTimeout(() => set({ steady: settle(state.sessions, state.activity) }), Math.max(0, wakeAt - Date.now()) + 50);
+  return states;
 }
 
 export function getState(): State {
@@ -272,7 +287,8 @@ export function onErrorsChange(cb: (prev: ErrorReport[], next: ErrorReport[]) =>
 function withoutDeadFilter(view: View, stories: Story[]): View {
   if (view.kind !== 'attention' && view.kind !== 'grid') return view;
   if (typeof view.storyFilter !== 'string') return view;
-  return stories.some((s) => s.id === view.storyFilter) ? view : { kind: view.kind };
+  if (stories.some((s) => s.id === view.storyFilter)) return view;
+  return view.kind === 'grid' ? { kind: 'grid', stateFilter: view.stateFilter } : { kind: view.kind };
 }
 
 export function startStore(): void {
@@ -309,7 +325,7 @@ export function startStore(): void {
     // A session shown on its own that no longer exists sends the user back to the grid.
     const current = state.view;
     const view: View = current.kind === 'single' && !sessions.some((s) => s.id === current.id) ? { kind: 'grid' } : current;
-    set({ sessions, loaded: true, view, selection: pruneSelection(state.selection, new Set(sessions.map((s) => s.id))) });
+    set({ sessions, steady: settle(sessions, state.activity), loaded: true, view, selection: pruneSelection(state.selection, new Set(sessions.map((s) => s.id))) });
     if (wasLoaded) for (const cb of sessionListeners) cb(prev, sessions);
   });
   socket.onStories((stories) => set({ stories, view: withoutDeadFilter(state.view, stories) }));
@@ -329,7 +345,7 @@ export function startStore(): void {
     for (const cb of errorListeners) cb(prev, errors);
   });
   socket.onChanges((list) => set({ changes: Object.fromEntries(list.map((c) => [c.worktree, c])) }));
-  socket.onActivity((activity) => set({ activity, sparks: recordActivity(state.sparks, activity, Date.now()) }));
+  socket.onActivity((activity) => set({ activity, steady: settle(state.sessions, activity), sparks: recordActivity(state.sparks, activity, Date.now()) }));
   socket.onState((connection) => {
     // Once the token is known to be refused, a failing socket must not hide that message.
     if (state.connection === 'unauthorized') return;

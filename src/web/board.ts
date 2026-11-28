@@ -40,6 +40,71 @@ export function glyphCounts(sessions: SessionInfo[], rates: Record<string, numbe
   return counts;
 }
 
+/** A state the header offers as a chip, and that the terminals can be narrowed to. */
+export type ChipState = 'needs' | 'finished' | 'working' | 'idle';
+
+/** The state of a session as the chips see it; an ended one is on no chip. */
+export type SteadyGlyph = ChipState | 'exited';
+
+/** What the chips show of one session, and the state it may be moving to. */
+export interface Steady {
+  shown: SteadyGlyph;
+  /** The state seen since `since`, not shown yet; null when it is the one shown. */
+  next: SteadyGlyph | null;
+  since: number;
+}
+
+/**
+ * How long a new state must last before the chips and the narrowed terminals follow it. A shell
+ * is working only while it prints, and a Claude session goes from working to finished and back
+ * between two steps: followed at once, terminals would come and go from under the pointer.
+ */
+export const STATE_DELAY_MS = 5000;
+
+function steadyGlyph(s: SessionInfo, rate: number): SteadyGlyph {
+  const g = glyphOf(s, rate);
+  return g === 'maybe' ? 'needs' : g;
+}
+
+/**
+ * The states shown after `prev`, now. A new session, one that needs the user and one that has
+ * ended show at once; any other change once it has lasted `delayMs`. `wakeAt` is when to look
+ * again for a change waiting its turn, null when none is.
+ */
+export function settleStates(prev: Record<string, Steady>, sessions: SessionInfo[], rates: Record<string, number>, now: number, delayMs = STATE_DELAY_MS): { states: Record<string, Steady>; wakeAt: number | null } {
+  const states: Record<string, Steady> = {};
+  let wakeAt: number | null = null;
+  for (const s of sessions) {
+    const seen = steadyGlyph(s, rates[s.id] ?? 0);
+    const before = prev[s.id];
+    let next: Steady;
+    if (!before || seen === before.shown || seen === 'needs' || seen === 'exited') next = { shown: seen, next: null, since: now };
+    else {
+      const since = before.next === seen ? before.since : now;
+      next = now - since >= delayMs ? { shown: seen, next: null, since: now } : { shown: before.shown, next: seen, since };
+    }
+    if (next.next !== null) wakeAt = Math.min(wakeAt ?? Infinity, next.since + delayMs);
+    states[s.id] = next;
+  }
+  return { states, wakeAt };
+}
+
+/** The sessions on a chip, by the states shown. All of them with no state. */
+export function inState(sessions: SessionInfo[], states: Record<string, Steady>, state: ChipState | undefined): SessionInfo[] {
+  if (state === undefined) return sessions;
+  return sessions.filter((s) => states[s.id]?.shown === state);
+}
+
+/** How many sessions each chip counts, by the states shown. */
+export function stateCounts(sessions: SessionInfo[], states: Record<string, Steady>): GlyphCounts {
+  const counts: GlyphCounts = { needs: 0, working: 0, finished: 0, idle: 0, exited: 0 };
+  for (const s of sessions) {
+    const shown = states[s.id]?.shown;
+    if (shown) counts[shown]++;
+  }
+  return counts;
+}
+
 /** The branch most of the sessions of an area are on; null when none of them knows. */
 export function areaBranch(sessions: SessionInfo[]): string | null {
   const tally = new Map<string, number>();
